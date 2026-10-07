@@ -125,5 +125,6 @@ test {
     _ = @import("refine.zig");
     _ = @import("cleanup.zig");
     _ = @import("flags.zig");
+    _ = @import("myers.zig");
     _ = @import("patch/parse.zig");
 }

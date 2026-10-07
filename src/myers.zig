@@ -50,6 +50,7 @@ pub const Buffers = struct {
     packed_a: std.ArrayList(u32) = .empty,
     packed_b: std.ArrayList(u32) = .empty,
     dis: std.ArrayList(u8) = .empty,
+    runs: std.ArrayList(u16) = .empty,
     kvd32: std.ArrayList(i32) = .empty,
     kvd64: std.ArrayList(i64) = .empty,
     stack: std.ArrayList(Box) = .empty,
@@ -224,22 +225,88 @@ fn select(
     try c.buffers.dis.resize(c.gpa, end - start);
     const dis = c.buffers.dis.items;
     const limit = @min(bogosqrt(ids.len), max_eqlimit);
+    var any_common = false;
     for (start..end) |i| {
         const id = ids[i];
         const nm: u64 = if (stamp[id] == gen) counts_other[id] else 0;
         dis[i - start] = if (nm == 0) 0 else if (nm >= limit and !c.minimal) 2 else 1;
+        any_common = any_common or dis[i - start] == 2;
+    }
+    if (any_common) {
+        try c.buffers.runs.resize(c.gpa, end - start);
+        markDiscardable(dis, c.buffers.runs.items);
     }
     try out.ensureTotalCapacity(c.gpa, end - start);
     for (start..end) |i| {
         const keep = switch (dis[i - start]) {
             1 => true,
-            2 => !inDiscardableRun(dis, @intCast(i - start), 0, @intCast(end - start - 1)),
+            2 => c.buffers.runs.items[i - start] & discard == 0,
             else => false,
         };
         if (keep) {
             out.appendAssumeCapacity(@intCast(i));
         } else {
             changed.set(@intCast(i), true);
+        }
+    }
+}
+
+/// In `runs`, the bit that says a too-common line is to be set aside.
+const discard: u16 = 0x8000;
+
+/// For every too-common line of `dis`, whether `inDiscardableRun` holds,
+/// as the `discard` bit of `runs[i]`. The counts either side of each line
+/// are kept in two sliding windows, one walked forwards and one
+/// backwards, so each line costs the same however long the runs: the
+/// direct scan reads up to a window either side of every line, which on a
+/// file of repeated lines is a hundred lines read per line.
+fn markDiscardable(dis: []const u8, runs: []u16) void {
+    const n = dis.len;
+    const w: usize = simscan_window;
+    // Forwards: the no-match and too-common lines in the window before
+    // each line, back to the last line worth matching.
+    var zeros: u16 = 0;
+    var twos: u16 = 0;
+    var run_start: usize = 0;
+    for (0..n) |k| {
+        runs[k] = zeros | twos << 7;
+        switch (dis[k]) {
+            1 => {
+                zeros = 0;
+                twos = 0;
+                run_start = k + 1;
+            },
+            0 => zeros += 1,
+            else => twos += 1,
+        }
+        if (k >= w and k - w >= run_start) {
+            if (dis[k - w] == 0) zeros -= 1 else twos -= 1;
+        }
+    }
+    // Backwards: the same after each line, and the verdict.
+    zeros = 0;
+    twos = 0;
+    var run_limit: usize = n;
+    var k = n;
+    while (k > 0) {
+        k -= 1;
+        if (dis[k] == 2) {
+            const zeros_before = runs[k] & 0x7f;
+            const common: u32 = 2 + ((runs[k] >> 7) & 0x7f) + twos;
+            const no_match: u32 = zeros_before + zeros;
+            if (zeros_before != 0 and zeros != 0 and common * kpdis_run < common + no_match) runs[k] |= discard;
+        }
+        switch (dis[k]) {
+            1 => {
+                zeros = 0;
+                twos = 0;
+                run_limit = k;
+            },
+            0 => zeros += 1,
+            else => twos += 1,
+        }
+        if (k + w < run_limit) {
+            if (dis[k + w] == 0) zeros -= 1 else twos -= 1;
         }
     }
 }
@@ -571,4 +638,22 @@ fn Search(comptime Int: type) type {
             return if (best > 0) best_split else null;
         }
     };
+}
+
+test "the windowed counts set aside what the direct scan does" {
+    var prng: std.Random.DefaultPrng = .init(0x77696e64);
+    const r = prng.random();
+    var dis: [600]u8 = undefined;
+    var runs: [600]u16 = undefined;
+    for (0..400) |_| {
+        const n = 1 + r.uintLessThan(usize, dis.len);
+        const ones = r.uintLessThan(u8, 40);
+        for (dis[0..n]) |*d| d.* = if (r.uintLessThan(u8, 100) < ones) 1 else if (r.boolean()) 0 else 2;
+        markDiscardable(dis[0..n], runs[0..n]);
+        for (0..n) |i| {
+            if (dis[i] != 2) continue;
+            const direct = inDiscardableRun(dis[0..n], @intCast(i), 0, @intCast(n - 1));
+            try std.testing.expectEqual(direct, runs[i] & discard != 0);
+        }
+    }
 }

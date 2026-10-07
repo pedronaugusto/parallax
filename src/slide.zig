@@ -18,8 +18,18 @@ const Group = struct { start: i64, end: i64 };
 
 fn groupInit(f: Flags) Group {
     var g: Group = .{ .start = 0, .end = 0 };
-    while (f.get(g.end)) g.end += 1;
+    g.end = runEnd(f, g.end);
     return g;
+}
+
+/// Where the run of changed lines from `at` ends: `at` itself, most often.
+/// The test comes before the loop, which compilers turn into a string
+/// length call, so the common case costs no call.
+fn runEnd(f: Flags, at: i64) i64 {
+    if (!f.get(at)) return at;
+    var end = at + 1;
+    while (f.get(end)) end += 1;
+    return end;
 }
 
 /// Move to the run after this one, stepping over exactly one unchanged
@@ -28,7 +38,7 @@ fn groupNext(f: Flags, g: *Group) bool {
     if (g.end == f.len) return false;
     g.start = g.end + 1;
     g.end = g.start;
-    while (f.get(g.end)) g.end += 1;
+    g.end = runEnd(f, g.end);
     return true;
 }
 
@@ -50,7 +60,7 @@ fn slideDown(f: Flags, ids: []const u32, g: *Group) bool {
     g.start += 1;
     f.set(@intCast(g.end), true);
     g.end += 1;
-    while (f.get(g.end)) g.end += 1;
+    g.end = runEnd(f, g.end);
     return true;
 }
 
