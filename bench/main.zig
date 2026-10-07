@@ -14,6 +14,8 @@
 //! - W7b: a conflict per ten lines, every style; W7c: many insertions at
 //!   the same places.
 //! - W8: every replace of W2 at 10% refined by words and by characters.
+//! - W9: the W5 pairs written as patches, parsed, and applied to the old side
+//!   as it is, shifted by inserted lines, and with context changed (fuzz 2).
 //!
 //! Timings are wall-clock on this machine; CI only compiles this file.
 const std = @import("std");
@@ -154,6 +156,7 @@ pub fn main(init: std.process.Init) !void {
     if (config.wants("W6")) try whitespace(r, gpa, &d, config, large);
     if (config.wants("W7")) try merges(r, gpa, &d, config);
     if (config.wants("W8")) try inline_(r, gpa, &d, config, large);
+    if (config.wants("W9")) try patches(r, gpa, config);
 }
 
 /// One pair under each algorithm, parallax then the baseline.
@@ -370,5 +373,69 @@ fn merges(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void 
             try r.line(case.name, label, "baseline", base_best / 1e6, "ms");
             try r.line(case.name, label, "A/B", base_best / best, "x");
         }
+    }
+}
+
+/// W9: patches parsed and applied, GNU patch's way.
+fn patches(r: Report, gpa: Allocator, config: Config) !void {
+    const pairs = try gen.w5(gpa, if (config.smoke) 50 else 5_000);
+    defer {
+        for (pairs) |p| p.deinit(gpa);
+        gpa.free(pairs);
+    }
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    // Each pair's patch, and its old side three ways.
+    const Case = struct { patch: []u8, bases: [3][]u8 };
+    const cases = try gpa.alloc(Case, pairs.len);
+    defer {
+        for (cases) |c| {
+            gpa.free(c.patch);
+            for (c.bases) |b| gpa.free(b);
+        }
+        gpa.free(cases);
+    }
+    var bytes: usize = 0;
+    for (pairs, cases) |p, *c| {
+        const diff = try d.lines(p.old, p.new, .{});
+        var out: Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        try parallax.writeUnified(&out.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } });
+        c.patch = try out.toOwnedSlice();
+        c.bases[0] = try gpa.dupe(u8, p.old);
+        c.bases[1] = try std.mem.concat(gpa, u8, &.{ "one\ntwo\nthree\n", p.old });
+        // The first line of every 40 changed: context the hunks may lean on.
+        c.bases[2] = try gpa.dupe(u8, p.old);
+        var line: usize = 0;
+        for (c.bases[2], 0..) |*ch, i| {
+            if (ch.* == '\n') line += 1 else if (line % 40 == 0 and (i == 0 or c.bases[2][i - 1] == '\n')) ch.* = '#';
+        }
+        bytes += c.patch.len + p.old.len;
+    }
+    var results: std.ArrayList(parallax.patch.HunkResult) = .empty;
+    defer results.deinit(gpa);
+    for ([_][]const u8{ "exact", "offset", "fuzz 2" }, 0..) |name, which| {
+        var best: f64 = std.math.inf(f64);
+        var failed: usize = 0;
+        for (0..config.runs + 1) |run| {
+            var discard_buffer: [4096]u8 = undefined;
+            var discard: Io.Writer.Discarding = .init(&discard_buffer);
+            failed = 0;
+            const t0 = r.now();
+            for (cases) |c| {
+                var p = try parallax.patch.parse(gpa, c.patch, .{});
+                defer p.deinit();
+                for (p.files) |file| {
+                    try results.resize(gpa, file.hunks.len);
+                    try parallax.patch.apply(gpa, &discard.writer, c.bases[which], file, .{ .fuzz = 2, .rejects = .skip }, results.items);
+                    for (results.items) |h| failed += @intFromBool(h == .rejected);
+                }
+            }
+            const t1 = r.now();
+            if (run != 0) best = @min(best, ns(t0, t1));
+        }
+        try r.line("W9", name, "per patch", best / @as(f64, @floatFromInt(cases.len)) / 1e3, "us");
+        try r.line("W9", name, "throughput", @as(f64, @floatFromInt(bytes)) / 1e6 / (best / 1e9), "MB/s");
+        try r.line("W9", name, "rejected", @floatFromInt(failed), "hunks");
     }
 }

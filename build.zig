@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
     for ([_][]const u8{ "diff", "unified", "merge" }) |name| {
         tests.root_module.addAnonymousImport(b.fmt("{s}.corpus", .{name}), .{ .root_source_file = b.path(b.fmt("testdata/git-2.55/{s}.corpus", .{name})) });
     }
+    tests.root_module.addAnonymousImport("patch.corpus", .{ .root_source_file = b.path("testdata/gnu-patch-2.8/patch.corpus") });
     tests.root_module.addAnonymousImport("gen", .{ .root_source_file = b.path("bench/gen.zig") });
     const test_step = b.step("test", "Run the tests and example");
     test_step.dependOn(&b.addRunArtifact(tests).step);

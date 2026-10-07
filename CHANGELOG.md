@@ -18,5 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `diffLines`, a one-shot diff that owns its memory.
 - `Interner(T, Context)` and `Differ.sequences`: any sequence diffs once interned, with the caller's anchors and indentation.
 - `Differ.refine`: the spans inside one change that differ, by `Tokens` (`words`, `chars`, `bytes`), under a `Compare`.
+- `patch.parse`: unified patches with any number of files, header lines kept verbatim, and `Diagnostics` for a malformed hunk.
+- `patch.apply`: one file's hunks applied with GNU patch's offset, fuzz, reverse and reject rules, and a result per hunk.
 
 [Unreleased]: https://github.com/pedronaugusto/parallax/commits/main

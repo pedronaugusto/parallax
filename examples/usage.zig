@@ -18,6 +18,7 @@ pub fn main(init: std.process.Init) !void {
     // --- README:usage ---
     try merging(gpa);
     try refining(gpa);
+    try patching(gpa);
 }
 
 fn merging(gpa: std.mem.Allocator) !void {
@@ -61,4 +62,28 @@ fn refining(gpa: std.mem.Allocator) !void {
     std.debug.assert(changes.len == 1);
     std.debug.assert(changes[0].old_start == 1);
     // --- README:refine ---
+}
+
+fn patching(gpa: std.mem.Allocator) !void {
+    // --- README:patch ---
+    const text =
+        \\--- a/notes.txt
+        \\+++ b/notes.txt
+        \\@@ -2,3 +2,3 @@
+        \\ two
+        \\-three
+        \\+THREE
+        \\ four
+        \\
+    ;
+    var patch = try parallax.patch.parse(gpa, text, .{});
+    defer patch.deinit();
+    // The base has gained a line at the top: the hunk applies one line on.
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    var results: [1]parallax.patch.HunkResult = undefined;
+    try parallax.patch.apply(gpa, &out.writer, "zero\none\ntwo\nthree\nfour\n", patch.files[0], .{ .fuzz = 2 }, &results);
+    std.debug.assert(std.mem.eql(u8, out.written(), "zero\none\ntwo\nTHREE\nfour\n"));
+    std.debug.assert(results[0].applied.offset == 1);
+    // --- README:patch ---
 }

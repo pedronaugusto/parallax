@@ -432,3 +432,83 @@ pub const NoResize = struct {
         n.inner.rawFree(m, a, ra);
     }
 };
+
+/// A random diff written as a patch: it parses back to its own hunks and
+/// applies to the old side to give the new, and backwards.
+pub fn patchOne(s: Source) !void {
+    const gpa = std.testing.allocator;
+    var a_buf: [256]u8 = undefined;
+    var b_buf: [320]u8 = undefined;
+    const old = text(s, &a_buf);
+    const new = if (s.oneIn(4)) text(s, &b_buf) else edit(s, old, &b_buf);
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
+    const diff = try d.lines(old, new, .{ .algorithm = algorithms[s.index(3)] });
+    var written: std.Io.Writer.Allocating = .init(gpa);
+    defer written.deinit();
+    try parallax.writeUnified(&written.writer, diff, .{
+        .hunks = .{ .context = @intCast(s.index(6)), .inter_hunk_context = @intCast(s.index(3)) },
+        .heading = if (s.boolean()) .c_function else null,
+        .files = .{ .old = "a/f", .new = "b/f" },
+    });
+    var p = try parallax.patch.parse(gpa, written.written(), .{});
+    defer p.deinit();
+    if (diff.changes.len == 0) return std.testing.expectEqual(@as(usize, 0), p.files.len);
+    try std.testing.expectEqual(@as(usize, 1), p.files.len);
+    const file = p.files[0];
+    try std.testing.expectEqualStrings("a/f", file.old_name.?);
+    for (file.hunks) |h| {
+        var old_lines: u32 = 0;
+        var new_lines: u32 = 0;
+        for (h.lines) |line| {
+            old_lines += @intFromBool(line.kind != .added);
+            new_lines += @intFromBool(line.kind != .removed);
+        }
+        try std.testing.expectEqual(h.old_len, old_lines);
+        try std.testing.expectEqual(h.new_len, new_lines);
+    }
+    for ([_]bool{ false, true }) |reverse| {
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        try parallax.patch.apply(gpa, &out.writer, if (reverse) new else old, file, .{ .reverse = reverse }, null);
+        try std.testing.expectEqualStrings(if (reverse) old else new, out.written());
+    }
+}
+
+/// Patch-shaped bytes: the parse returns a patch or one of its own errors,
+/// and every hunk it returns holds the lines its header counts.
+pub fn parseOne(s: Source) !void {
+    const pieces = [_][]const u8{
+        "--- a/f\n", "+++ b/f\n",                      "@@ -1,2 +1 @@\n",      "@@ -0,0 +1 @@ h\n", "@@ -1 +1,2 @@\n", " a\n", "-b\n",
+        "+c\n",      "\\ No newline at end of file\n", "diff --git a/f b/f\n", "\n",                "x\n",             "@@ -", "+++ ",
+        "--- ",
+    };
+    var buf: [512]u8 = undefined;
+    var len: usize = 0;
+    while (!s.oneIn(40)) {
+        const p = pieces[s.index(pieces.len)];
+        if (len + p.len > buf.len) break;
+        @memcpy(buf[len..][0..p.len], p);
+        len += p.len;
+    }
+    var diagnostics: parallax.patch.Diagnostics = .{};
+    var p = parallax.patch.parse(std.testing.allocator, buf[0..len], .{ .diagnostics = &diagnostics }) catch |err| switch (err) {
+        error.InvalidHunkHeader, error.HunkLengthMismatch, error.UnexpectedLine => {
+            try std.testing.expect(diagnostics.line != 0);
+            return;
+        },
+        error.OutOfMemory => return err,
+    };
+    defer p.deinit();
+    for (p.files) |f| for (f.hunks) |h| {
+        var old_lines: u32 = 0;
+        var new_lines: u32 = 0;
+        for (h.lines) |line| {
+            old_lines += @intFromBool(line.kind != .added);
+            new_lines += @intFromBool(line.kind != .removed);
+        }
+        try std.testing.expectEqual(h.old_len, old_lines);
+        try std.testing.expectEqual(h.new_len, new_lines);
+    };
+}

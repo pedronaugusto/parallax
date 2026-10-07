@@ -3,10 +3,11 @@
 parallax is a line diff and a three-way line merge in Zig. Its output is git's,
 byte for byte: the same edit scripts under Myers, minimal, patience, anchored and
 histogram, the same hunks and unified body, and the same merged text in the
-merge, diff3 and zdiff3 styles. The same algorithms diff any sequence, and refine
-a changed line down to the words or characters that differ. It has no Io: every
-call is pure computation, and a reusable workspace makes no allocation once it
-is warm.
+merge, diff3 and zdiff3 styles. The same algorithms diff any sequence and refine
+a changed line down to the words or characters that differ, and unified patches
+parse and apply with GNU patch's offset and fuzz rules. It has no Io: every call
+is pure computation, and a reusable workspace makes no allocation once it is
+warm.
 
 ## Install
 
@@ -91,6 +92,34 @@ std.debug.assert(changes[0].old_start == 1);
 ```
 <!-- END GENERATED -->
 
+A patch parses into files and hunks, and applies where its text is found:
+
+<!-- BEGIN GENERATED zig build docs -- patch -->
+```zig
+const parallax = @import("parallax");
+
+const text =
+    \\--- a/notes.txt
+    \\+++ b/notes.txt
+    \\@@ -2,3 +2,3 @@
+    \\ two
+    \\-three
+    \\+THREE
+    \\ four
+    \\
+;
+var patch = try parallax.patch.parse(gpa, text, .{});
+defer patch.deinit();
+// The base has gained a line at the top: the hunk applies one line on.
+var out: std.Io.Writer.Allocating = .init(gpa);
+defer out.deinit();
+var results: [1]parallax.patch.HunkResult = undefined;
+try parallax.patch.apply(gpa, &out.writer, "zero\none\ntwo\nthree\nfour\n", patch.files[0], .{ .fuzz = 2 }, &results);
+std.debug.assert(std.mem.eql(u8, out.written(), "zero\none\ntwo\nTHREE\nfour\n"));
+std.debug.assert(results[0].applied.offset == 1);
+```
+<!-- END GENERATED -->
+
 ## Design
 
 Every line becomes a dense `u32` id. The texts are split at `\n` without copying
@@ -159,6 +188,28 @@ changed or not, that cover the change's lines and never cross a line end. A
 change with an empty side is one changed span per line. Tokens compare under the
 options' `Compare`, so case and whitespace can be overlooked inside a line too.
 
+### Patches
+
+`patch.parse` reads a unified patch with any number of files. The lines before a
+file's `---` are its header, kept verbatim (`diff --git`, `index`, `rename from`
+and the like are the caller's to read); a section with a git header and no `---`,
+such as a mode change, is a file with no names and no hunks. A hunk must hold the
+lines its header counts, or the parse stops with `error.HunkLengthMismatch` and
+`Diagnostics` says on which line. `\ No newline at end of file` marks the line
+before it; a carriage return stays in a line's text.
+
+`patch.apply` writes the base with one file's hunks applied, by GNU patch's
+rules. Hunks apply in order, each after the end of the one before. A hunk is
+looked for at its stated line plus the offset the hunks before it found, then
+further away, one line at a time, after and then before, within `max_offset`;
+failing that, again with up to `fuzz` context lines ignored at each end. A hunk
+with less context at its start than at its end only applies at the start of the
+file, and the other way round at the end. Context lines are taken from the base,
+never from the patch, so ignored context is kept. `reverse` applies the patch
+backwards. Each hunk reports where it applied, its offset and the fuzz it took,
+or that it was rejected; `rejects = .skip` goes on past a rejected hunk, as GNU
+patch does, and `.fail` stops at it.
+
 ### Merge styles and levels
 
 | `Level` | git | |
@@ -187,10 +238,13 @@ diff3 is capped at eager, as in git. `Resolve` is `markers`, `ours`, `theirs` or
 | `writeUnified(w, diff, options)` | The unified body, optionally with `---`/`+++` lines |
 | `merge.write(w, merge, options)` | The merged text with labels, marker size and resolution |
 | `merge.mergeAlloc(gpa, base, ours, theirs, options, write_options)` | Merge and write in one call |
+| `patch.parse(gpa, text, options)` | The files and hunks of a unified patch, borrowing the text |
+| `patch.apply(gpa, w, base, file, options, results)` | The base with one file's hunks applied, and each hunk's result |
 
 Every input is under 4 GiB, and the inputs of one call hold fewer than 2^32 lines
-between them; anything larger is `error.InputTooLarge`. The only other error is
-`error.OutOfMemory`.
+between them; anything larger is `error.InputTooLarge`. Past that, a diff, merge
+or refinement fails only with `error.OutOfMemory`; `patch.parse` and `patch.apply`
+have errors of their own, named in their error sets.
 
 ## Scope
 
@@ -200,6 +254,8 @@ between them; anything larger is `error.InputTooLarge`. The only other error is
   binary is the caller's.
 - No rename or copy similarity, no directory diff and no binary deltas.
 - No wall-clock deadline: `max_work` is the reproducible cap.
+- No git apply rules: extended headers, binary patches, `--3way` and whitespace
+  fixing are git's, layered on the header lines `patch.parse` keeps.
 - No structural (syntax-tree) diff or merge.
 
 ## Platforms
@@ -208,6 +264,11 @@ Every target Zig supports, wasm32-freestanding included. parallax uses only
 `std.mem`, `std.hash`, `std.Io.Writer` and an `Allocator`. Nothing is serialised,
 so byte order never matters; the byte scans that use vectors have a scalar twin,
 and a test holds the two to the same answer.
+
+## Built with
+
+**tycho**, every coding agent in one folder (in development), and the Zig packages it
+is built from.
 
 ## Testing
 
@@ -218,7 +279,10 @@ algorithm, 1,483 unified bodies across context, inter-hunk context, headings, th
 whitespace flags, `--ignore-blank-lines` and `-I`, and 3,015 merges in every style,
 algorithm, label, marker size and resolution, with `merge-tree`'s blobs for the
 merge machinery's level and whitespace options. parallax must reproduce every
-byte.
+byte. GNU patch 2.8 is the reference for applying: 488 applications captured from
+it (`testdata/gnu-patch-2.8/`) cover offsets, fuzz, reverse and rejected hunks,
+and parallax must write the same text and report the same fuzz and offset for
+every hunk.
 
 Properties run on seeded inputs in every `zig build test`, and under the fuzzer
 with `zig build test --fuzz`: every script applies, under every algorithm,
@@ -226,16 +290,18 @@ comparison and work cap, for lines and for id sequences; a minimal script is
 never longer; lines of one form always match; refined spans tile every changed
 line and the unchanged ones read the same on both sides; a merge's regions cover
 our side in order, an unchanged side gives the other, and the markers read back
-give each side's resolution. A warm
-workspace is counted to make no allocation, every allocation failure is survived
-without a leak, the adversarial workloads are held to recorded work units and
-scripts, and the deep inputs run on a 64 KiB stack.
+give each side's resolution. A written patch parses back to its hunks and applies
+forwards and backwards, and the parse takes any bytes, failing only with its own
+errors. A warm workspace is counted to make no allocation, every allocation
+failure is survived without a leak, the adversarial workloads are held to
+recorded work units and scripts, and the deep inputs run on a 64 KiB stack.
 
 `zig build bench -- [--smoke] [--json] [--runs N] [--only W1,W5]` times parallax's
 own workloads in ReleaseFast: large files with few and many edits, the
 adversarial shapes, many small diffs through one workspace with their latency and
 allocations, the whitespace flags, merges with many conflicts, each beside the
-code parallax replaces, and the refinement of every replaced line. CI compiles
+code parallax replaces, the refinement of every replaced line, and patches parsed
+and applied as they are, shifted and with their context changed. CI compiles
 the benchmarks and never times them.
 
 ## Licence

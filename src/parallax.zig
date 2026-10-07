@@ -72,6 +72,8 @@ pub const Span = refine.Span;
 pub const Refined = refine.Refined;
 /// The three-way merge.
 pub const merge = @import("merge.zig");
+/// Unified patches: parse and apply.
+pub const patch = @import("patch.zig");
 
 /// A one-shot line diff that owns its memory.
 pub const OwnedDiff = struct {
@@ -119,4 +121,5 @@ test {
     _ = @import("slide.zig");
     _ = @import("interner.zig");
     _ = @import("refine.zig");
+    _ = @import("patch/parse.zig");
 }

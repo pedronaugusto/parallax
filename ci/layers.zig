@@ -42,9 +42,19 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "workspace", .patterns = &.{
         "src/Differ.zig",
     } },
+    .{ .name = "patch types", .patterns = &.{
+        "src/patch/types.zig",
+    } },
+    .{ .name = "patch parse and apply", .patterns = &.{
+        "src/patch/parse.zig",
+        "src/patch/apply.zig",
+    } },
     .{ .name = "writers", .patterns = &.{
         "src/unified.zig",
         "src/merge.zig",
+    } },
+    .{ .name = "patches", .patterns = &.{
+        "src/patch.zig",
     } },
     .{ .name = "public", .patterns = &.{
         "src/parallax.zig",
@@ -61,6 +71,7 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "diff.corpus",
         "unified.corpus",
         "merge.corpus",
+        "patch.corpus",
         "gen",
         "builtin",
     } },
@@ -86,6 +97,10 @@ pub const required = [_][]const u8{
     "src/Differ.zig",
     "src/unified.zig",
     "src/merge.zig",
+    "src/patch/types.zig",
+    "src/patch/parse.zig",
+    "src/patch/apply.zig",
+    "src/patch.zig",
     "src/parallax.zig",
     "src/tests.zig",
 };
