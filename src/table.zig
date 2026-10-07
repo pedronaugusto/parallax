@@ -34,7 +34,7 @@ pub const Table = struct {
     classes: u32 = 0,
 
     /// Lines hashed ahead of their lookups, each slot fetched while the
-    /// others hash.
+    /// others hash. At most 64, the bits of a mask.
     const batch = 16;
 
     pub fn deinit(t: *Table, gpa: Allocator) void {
@@ -64,17 +64,26 @@ pub const Table = struct {
         const lines = texts.sides[side];
         const offset = texts.offsets[side];
         var hashes: [batch]u64 = undefined;
+        // A line with the bytes of the line before has its id: a run of
+        // blank lines or closing braces costs no hash or lookup.
         var at = from;
         while (at < to) {
             const n = @min(batch, to - at);
             try t.reserve(gpa, n);
             const mask = t.slots.items.len - 1;
-            for (hashes[0..n], at..) |*h, i| {
-                h.* = compare_mod.hash(lines.get(@intCast(i)), compare);
+            var repeats: u64 = 0;
+            for (hashes[0..n], at.., 0..) |*h, i, k| {
+                const line = lines.get(@intCast(i));
+                if (i > from and std.mem.eql(u8, line, lines.get(@intCast(i - 1)))) {
+                    repeats |= @as(@TypeOf(repeats), 1) << @intCast(k);
+                    continue;
+                }
+                h.* = compare_mod.hash(line, compare);
                 @prefetch(&t.slots.items[tagOf(h.*) & mask], .{ .rw = .write });
             }
-            for (hashes[0..n], at..) |h, i| {
-                out[i - from] = t.internHashed(texts, @intCast(offset + i), lines.get(@intCast(i)), h, compare);
+            for (hashes[0..n], at.., 0..) |h, i, k| {
+                const repeat = repeats >> @intCast(k) & 1 != 0;
+                out[i - from] = if (repeat) out[i - from - 1] else t.internHashed(texts, @intCast(offset + i), lines.get(@intCast(i)), h, compare);
             }
             at += n;
         }
@@ -168,4 +177,30 @@ test "the table grows past its first size and keeps every id" {
     while (at < 1000) : (at += 7) try t.internLines(gpa, &texts, 0, at, @min(at + 7, 1000), ids[at..], .{});
     for (ids, 0..) |id, i| try std.testing.expectEqual(@as(u32, @intCast(i % 300)), id);
     try std.testing.expectEqual(@as(u32, 300), t.classes);
+}
+
+test "a run of one line keeps its id across batches and ranges" {
+    const gpa = std.testing.allocator;
+    var t: Table = .{};
+    defer t.deinit(gpa);
+    try t.reset(gpa, 0);
+    var text: std.ArrayList(u8) = .empty;
+    defer text.deinit(gpa);
+    var ends: std.ArrayList(u32) = .empty;
+    defer ends.deinit(gpa);
+    var want: [100]u32 = undefined;
+    for (&want, 0..) |*w, i| {
+        // Runs of 1 to 40 equal lines, a few values over and over.
+        const value = (i / 23 + i / 40) % 3;
+        try text.print(gpa, "{d}\n", .{value});
+        try ends.append(gpa, @intCast(text.items.len));
+        w.* = @intCast(value);
+    }
+    var texts: Texts = .{ .count = 1 };
+    texts.sides[0] = .{ .text = text.items, .ends = ends.items };
+    var ids: [100]u32 = undefined;
+    try t.internLines(gpa, &texts, 0, 0, 37, ids[0..37], .{});
+    try t.internLines(gpa, &texts, 0, 37, 100, ids[37..], .{});
+    // Ids are given in the order values are first seen.
+    for (ids, want) |id, value| try std.testing.expectEqual(ids[std.mem.findScalar(u32, &want, value).?], id);
 }
