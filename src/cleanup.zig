@@ -308,7 +308,7 @@ const Script = struct {
         stack.clearRetainingCapacity();
         var changed = false;
         var last_equality: ?u32 = null;
-        var pointer: isize = 0;
+        var pointer: i64 = 0;
         // Tokens changed before the last equality, and after it.
         var inserted_before: u32 = 0;
         var deleted_before: u32 = 0;
@@ -383,7 +383,7 @@ const Script = struct {
         const ops = s.ops;
         // Signed: removing both equalities around the first edit steps it
         // back past the start, as diff-match-patch's index does.
-        var p: isize = 1;
+        var p: i64 = 1;
         while (p + 1 < ops.items.len) : (p += 1) {
             const pointer: usize = @intCast(p);
             if (ops.items[pointer - 1].kind != .equal or ops.items[pointer + 1].kind != .equal) continue;
@@ -473,7 +473,7 @@ const Script = struct {
         const cost = s.in.edit_cost;
         var changed = false;
         var last_equality: ?u32 = null;
-        var pointer: isize = 0;
+        var pointer: i64 = 0;
         // Whether there is an insertion or deletion before the last
         // equality, and after it.
         var pre_ins = false;
