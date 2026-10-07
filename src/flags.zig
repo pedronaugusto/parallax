@@ -36,7 +36,33 @@ pub const Flags = struct {
         @memset(f.bytes[1..][0..f.len], 0);
     }
 
+    /// How many lines from `from` on are clear, up to the end of the side:
+    /// eight flags a word at a time.
+    pub fn unchangedRun(f: Flags, from: u32) u32 {
+        const bytes = f.bytes[1 .. f.len + 1];
+        var at: usize = from;
+        while (at + 8 <= bytes.len) : (at += 8) {
+            const word = std.mem.readInt(u64, bytes[at..][0..8], .little);
+            if (word != 0) return @intCast(at + @ctz(word) / 8 - from);
+        }
+        while (at < bytes.len and bytes[at] == 0) at += 1;
+        return @intCast(at - from);
+    }
+
     pub fn setRange(f: Flags, from: u32, count: u32) void {
         @memset(f.bytes[@as(usize, from) + 1 ..][0..count], 1);
     }
 };
+
+test "a run of clear flags is counted to the first set one or the end" {
+    var storage: [42]u8 = undefined;
+    const f: Flags = .whole(&storage, 40);
+    try std.testing.expectEqual(@as(u32, 40), f.unchangedRun(0));
+    f.set(13, true);
+    f.set(30, true);
+    try std.testing.expectEqual(@as(u32, 13), f.unchangedRun(0));
+    try std.testing.expectEqual(@as(u32, 0), f.unchangedRun(13));
+    try std.testing.expectEqual(@as(u32, 16), f.unchangedRun(14));
+    try std.testing.expectEqual(@as(u32, 9), f.unchangedRun(31));
+    try std.testing.expectEqual(@as(u32, 0), f.unchangedRun(40));
+}

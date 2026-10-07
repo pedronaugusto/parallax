@@ -38,11 +38,61 @@ pub const SplitError = error{ OutOfMemory, InputTooLarge };
 /// Append the end offset of every line of `text` to `ends`.
 pub fn split(gpa: Allocator, ends: *std.ArrayList(u32), text: []const u8) SplitError!void {
     if (text.len > max_bytes) return error.InputTooLarge;
-    var at: usize = 0;
+    const done = if (vector_len != null) try splitBlocks(gpa, ends, text) else 0;
+    try splitScalar(gpa, ends, text, done);
+}
+
+/// The lines from `from` on, one newline search each.
+fn splitScalar(gpa: Allocator, ends: *std.ArrayList(u32), text: []const u8, from: usize) Allocator.Error!void {
+    var at = from;
     while (at < text.len) {
         const end = if (std.mem.findScalarPos(u8, text, at, '\n')) |nl| nl + 1 else text.len;
         try ends.append(gpa, @intCast(end));
         at = end;
+    }
+}
+
+/// Bytes per block of the vector scan: one bit of a mask each.
+const block = 64;
+
+/// The lines ending in the whole blocks of `text`: each block's newlines
+/// found at once, as a mask, and read off its set bits. Returns where the
+/// blocks end, a line start, for `splitScalar` to go on from.
+fn splitBlocks(gpa: Allocator, ends: *std.ArrayList(u32), text: []const u8) Allocator.Error!usize {
+    var at: usize = 0;
+    var line_start: usize = 0;
+    while (at + block <= text.len) : (at += block) {
+        const bytes: @Vector(block, u8) = text[at..][0..block].*;
+        var mask: u64 = @bitCast(bytes == @as(@Vector(block, u8), @splat('\n')));
+        if (mask == 0) continue;
+        try ends.ensureUnusedCapacity(gpa, @popCount(mask));
+        while (mask != 0) : (mask &= mask - 1) {
+            const end = at + @ctz(mask) + 1;
+            ends.appendAssumeCapacity(@intCast(end));
+            line_start = end;
+        }
+    }
+    return line_start;
+}
+
+test "the block and scalar line splits agree" {
+    const gpa = std.testing.allocator;
+    var prng: std.Random.DefaultPrng = .init(0x73706c69);
+    const r = prng.random();
+    var text: [700]u8 = undefined;
+    var a: std.ArrayList(u32) = .empty;
+    defer a.deinit(gpa);
+    var b: std.ArrayList(u32) = .empty;
+    defer b.deinit(gpa);
+    for (0..500) |_| {
+        const n = r.uintLessThan(usize, text.len + 1);
+        const odds = 1 + r.uintLessThan(u8, 80);
+        for (text[0..n]) |*c| c.* = if (r.uintLessThan(u8, odds) == 0) '\n' else 'x';
+        a.clearRetainingCapacity();
+        b.clearRetainingCapacity();
+        try split(gpa, &a, text[0..n]);
+        try splitScalar(gpa, &b, text[0..n], 0);
+        try std.testing.expectEqualSlices(u32, b.items, a.items);
     }
 }
 

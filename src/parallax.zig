@@ -124,5 +124,6 @@ test {
     _ = @import("interner.zig");
     _ = @import("refine.zig");
     _ = @import("cleanup.zig");
+    _ = @import("flags.zig");
     _ = @import("patch/parse.zig");
 }

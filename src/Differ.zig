@@ -115,7 +115,7 @@ pub fn deinit(d: *Differ) void {
 /// Release the scratch when it holds more than `keep` bytes: a long-lived
 /// caller after one huge diff. The next call allocates again.
 pub fn shrink(d: *Differ, keep: usize) void {
-    var total: usize = d.table.slots.capacity * @sizeOf(@TypeOf(d.table.slots.items[0]));
+    var total: usize = d.table.slots.capacity * 8 + d.table.first.capacity * 4;
     total += d.refine_buffers.capacity();
     d.eachList(&total, struct {
         fn f(sum: *usize, list: anytype) void {
@@ -129,6 +129,7 @@ pub fn shrink(d: *Differ, keep: usize) void {
         }
     }.f);
     d.table.slots.clearAndFree(d.gpa);
+    d.table.first.clearAndFree(d.gpa);
     d.refine_buffers.deinit(d.gpa);
     d.refine_buffers = .{};
 }
@@ -137,15 +138,15 @@ fn eachList(d: *Differ, context: anytype, comptime f: anytype) void {
     const c = &d.scratch;
     const m = &d.merge_buffers;
     inline for (.{
-        &c.myers.index_a,     &c.myers.index_b,     &c.myers.packed_a,    &c.myers.packed_b,
-        &c.myers.dis,         &c.myers.kvd32,       &c.myers.kvd64,       &c.myers.stack,
-        &c.myers.count_a,     &c.myers.count_b,     &c.myers.stamp,       &c.histogram.next,
-        &c.histogram.rec_ptr, &c.histogram.rec_cnt, &c.histogram.stamp,   &c.histogram.stack,
-        &c.patience.slots,    &c.patience.piles,    &c.patience.backbone, &c.patience.todo,
-        &c.patience.slot_of,  &c.patience.stamp,    &c.flags_a,           &c.flags_b,
-        &d.ends[0],           &d.ends[1],           &d.ends[2],           &d.ids,
-        &d.changes,           &d.changes_theirs,    &m.hunks,             &m.same,
-        &m.regions,           &m.refine,
+        &c.myers.index_a,     &c.myers.index_b,     &c.myers.packed_a,  &c.myers.packed_b,
+        &c.myers.dis,         &c.myers.kvd32,       &c.myers.kvd64,     &c.myers.stack,
+        &c.myers.count_a,     &c.myers.count_b,     &c.myers.stamp,     &c.histogram.next,
+        &c.histogram.rec_ptr, &c.histogram.rec_cnt, &c.histogram.stamp, &c.histogram.stack,
+        &c.patience.slots,    &c.patience.piles,    &c.patience.tops,   &c.patience.backbone,
+        &c.patience.todo,     &c.patience.slot_of,  &c.patience.stamp,  &c.flags_a,
+        &c.flags_b,           &d.ends[0],           &d.ends[1],         &d.ends[2],
+        &d.ids,               &d.changes,           &d.changes_theirs,  &m.hunks,
+        &m.same,              &m.regions,           &m.refine,
     }) |list| f(context, list);
 }
 
@@ -177,9 +178,7 @@ fn internAll(d: *Differ, texts: *const table_mod.Texts, compare: Compare) Alloca
     if (texts.count != 2) {
         for (texts.sides[0..texts.count], 0..) |side, s| {
             const off = texts.offsets[s];
-            for (0..side.len()) |i| {
-                ids[off + i] = try d.table.intern(d.gpa, texts, @intCast(off + i), side.get(@intCast(i)), compare);
-            }
+            try d.table.internLines(d.gpa, texts, s, 0, side.len(), ids[off..][0..side.len()], compare);
         }
         return d.table.classes;
     }
@@ -199,13 +198,11 @@ fn internAll(d: *Differ, texts: *const table_mod.Texts, compare: Compare) Alloca
     var tail: u32 = 0;
     while (tail < n_old - head and tail < n_new - head and old.start(n_old - 1 - tail) > old.text.len - suffix) tail += 1;
 
-    for (0..n_old) |i| ids[i] = try d.table.intern(d.gpa, texts, @intCast(i), old.get(@intCast(i)), compare);
+    try d.table.internLines(d.gpa, texts, 0, 0, n_old, ids[0..n_old], compare);
     const new_ids = ids[n_old..];
     @memcpy(new_ids[0..head], ids[0..head]);
     @memcpy(new_ids[n_new - tail ..], ids[n_old - tail .. n_old]);
-    for (head..n_new - tail) |i| {
-        new_ids[i] = try d.table.intern(d.gpa, texts, @intCast(n_old + i), new.get(@intCast(i)), compare);
-    }
+    try d.table.internLines(d.gpa, texts, 1, head, n_new - tail, new_ids[head .. n_new - tail], compare);
     return d.table.classes;
 }
 

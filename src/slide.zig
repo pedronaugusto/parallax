@@ -174,6 +174,17 @@ pub fn compact(
 
         if (!groupNext(f, &g)) break;
         assert(groupNext(other, &go));
+        // Unchanged lines on both sides are empty groups with nothing to
+        // slide: step over them together, all but the last.
+        if (g.end == g.start and go.end == go.start) {
+            const skip = @min(f.unchangedRun(@intCast(g.end)), other.unchangedRun(@intCast(go.end)));
+            if (skip > 1) {
+                g.start += skip - 1;
+                g.end = g.start;
+                go.start += skip - 1;
+                go.end = go.start;
+            }
+        }
     }
 
     assert(!groupNext(other, &go));

@@ -19,6 +19,7 @@ const histogram = @import("histogram.zig");
 pub const Buffers = struct {
     slots: std.ArrayList(Slot) = .empty,
     piles: std.ArrayList(u32) = .empty,
+    tops: std.ArrayList(u32) = .empty,
     backbone: std.ArrayList(u32) = .empty,
     todo: std.ArrayList(Region) = .empty,
     /// Per id: its slot in the current region, valid where `stamp` holds the
@@ -158,6 +159,10 @@ fn State(comptime Anchor: type) type {
             const slots = p.slots.items;
             try p.piles.resize(s.c.gpa, slots.len);
             const piles = p.piles.items;
+            // The new-side line on top of each pile, beside the piles, so
+            // the search reads one array.
+            try p.tops.resize(s.c.gpa, slots.len);
+            const tops = p.tops.items;
             var longest: usize = 0;
             // No pile at or below this one may be replaced.
             var anchor_at: i64 = -1;
@@ -165,15 +170,21 @@ fn State(comptime Anchor: type) type {
             for (slots, 0..) |*slot, at| {
                 if (slot.line2 == Slot.none or slot.line2 == Slot.repeated) continue;
                 var left: i64 = -1;
-                var right: i64 = @intCast(longest);
-                while (left + 1 < right) {
-                    const middle = left + @divTrunc(right - left, 2);
-                    if (slots[piles[@intCast(middle)]].line2 > slot.line2) right = middle else left = middle;
+                if (longest != 0 and slot.line2 > tops[longest - 1]) {
+                    // Above every pile, as lines in order mostly are.
+                    left = @intCast(longest - 1);
+                } else {
+                    var right: i64 = @intCast(longest);
+                    while (left + 1 < right) {
+                        const middle = left + @divTrunc(right - left, 2);
+                        if (tops[@intCast(middle)] > slot.line2) right = middle else left = middle;
+                    }
                 }
                 slot.previous = if (left < 0) no_slot else piles[@intCast(left)];
                 const i = left + 1;
                 if (i <= anchor_at) continue;
                 piles[@intCast(i)] = @intCast(at);
+                tops[@intCast(i)] = slot.line2;
                 if (slot.anchor) {
                     anchor_at = i;
                     longest = @intCast(anchor_at + 1);
