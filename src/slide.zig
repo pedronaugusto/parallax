@@ -187,7 +187,7 @@ pub fn compact(
         // Unchanged lines on both sides are empty groups with nothing to
         // slide: step over them together, all but the last.
         if (g.end == g.start and go.end == go.start) {
-            const skip = @min(f.unchangedRun(@intCast(g.end)), other.unchangedRun(@intCast(go.end)));
+            const skip = f.unchangedRun(@intCast(g.end), other, @intCast(go.end));
             if (skip > 1) {
                 g.start += skip - 1;
                 g.end = g.start;
