@@ -12,6 +12,7 @@ pub fn main(init: std.process.Init) !u8 {
     const io = init.io;
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--smoke")) return smoke(gpa);
     if (args.len < 2) return error.Usage;
     var files: std.ArrayList([]const u8) = .empty;
     var options: parallax.Options = .{};
@@ -65,4 +66,24 @@ pub fn main(init: std.process.Init) !u8 {
     } else return error.Usage;
     try w.flush();
     return status;
+}
+
+fn smoke(gpa: std.mem.Allocator) !u8 {
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    const diff = try d.lines("a\nb\n", "a\nc\n", .{});
+    try parallax.writeUnified(&out.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } });
+    var patch = try parallax.patch.parse(gpa, out.written(), .{});
+    defer patch.deinit();
+    if (patch.files.len != 1) return error.SmokeFailed;
+    out.clearRetainingCapacity();
+    try parallax.patch.apply(gpa, &out.writer, "a\nb\n", patch.files[0], .{}, null);
+    if (!std.mem.eql(u8, out.written(), "a\nc\n")) return error.SmokeFailed;
+    const merged = try d.merge("a\nb\n", "a\nc\n", "a\nb\n", .{});
+    out.clearRetainingCapacity();
+    try parallax.merge.write(&out.writer, merged, .{});
+    if (!std.mem.eql(u8, out.written(), "a\nc\n") or merged.conflicts != 0) return error.SmokeFailed;
+    return 0;
 }

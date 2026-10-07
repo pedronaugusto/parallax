@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Property tests use shakedown generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; allocation failure sweeps use its NoResize allocator and repeated fixtures use its corpus helpers.
+- Pin preflight 87ff327 and shakedown 1bb13e7, keep test dependencies lazy, ship only the library sources and package documents, and smoke-run each benchmark program through preflight.
+
 ### Added
 
 - `Differ`: a reusable workspace that makes no allocation once warm, with `lines`, `sequences`, `merge` and `shrink`.

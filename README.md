@@ -319,7 +319,10 @@ hunk. diff-match-patch 20241021 is the reference for the cleanups: its diffs of
 609 text pairs, cleaned up by parallax's passes, must come out as its own
 semantic and efficiency cleanups leave them.
 
-Properties run on seeded inputs in every `zig build test`, and under the fuzzer
+Properties run through shakedown on 20,500 seeded cases in every `zig build test`,
+with failures shrunk and printed as replayable tapes. Select a property with
+`-Dtest-filter` and set `SHAKEDOWN_TAPE` to replay it, or `SHAKEDOWN_SEED` to
+choose another seed. The same properties run under the fuzzer
 with `zig build test --fuzz`: every script applies, under every algorithm,
 comparison, work cap and a raised stop flag, for lines and for id sequences; a
 minimal script is never longer; hunks hold their changes, with whole functions
@@ -336,7 +339,7 @@ held to recorded work units and scripts, a stop flag raised before or during a
 diff ends it with a script that applies, and the deep inputs run on a 64 KiB
 stack.
 
-`zig build bench -- [--smoke] [--json] [--runs N] [--only W1,W5]` times parallax's
+`zig build bench` builds the programs into `zig-out/bench` and times parallax's
 own workloads in ReleaseFast: large files with few and many edits, the
 adversarial shapes, many small diffs through one workspace with their latency and
 allocations, the whitespace flags, merges with many conflicts, each beside the
@@ -345,12 +348,13 @@ and applied as they are, shifted and with their context changed. `zig build
 bench-corpus -- --repo <git repository> --out <directory>` collects the
 changed files of a range of real history (Linux v6.11..v6.12 unless `--range`
 says otherwise) into a directory outside this repository, checked against
-`bench/linux-v6.11-v6.12.manifest`; `zig build bench -- --corpus <directory>`
+`bench/linux-v6.11-v6.12.manifest`; `zig-out/bench/bench --corpus <directory>`
 then also times every changed file of the range, the large ones apart, and the
 merges of its merge commits. `zig build cli -Doptimize=ReleaseFast` builds
 `bench/cli`, a small command that diffs, merges and applies files, for timing
-parallax end to end against other tools. CI compiles the benchmarks and never
-times them.
+parallax end to end against other tools. Run `zig-out/bench/bench` with `--json`,
+`--runs N`, `--only W1,W5` or `--smoke` for smaller inputs. Every `zig build test`
+smoke-runs all three programs, including a tiny Git history for the corpus writer.
 
 ## Licence
 

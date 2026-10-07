@@ -3,6 +3,7 @@
 //! unified writer.
 
 const std = @import("std");
+const shakedown = @import("shakedown");
 const parallax = @import("../parallax.zig");
 const corpus = @import("corpus.zig");
 const support = @import("support.zig");
@@ -87,19 +88,19 @@ test "apply does what GNU patch does: offsets, fuzz, reverse and rejects" {
 }
 
 test "a written patch parses and applies back, forwards and in reverse" {
-    try support.seeded(support.patchOne, 0x726f756e, 1500);
+    try shakedown.check(std.testing.allocator, {}, support.patchOne, .{ .seed = 0x726f756e, .cases = 1500 });
 }
 
 test "fuzz: parse takes any bytes, failing only with its own errors" {
-    try std.testing.fuzz({}, support.fuzzed(support.parseOne), .{});
+    try shakedown.check(std.testing.allocator, {}, support.parseOne, .{ .seed = 0x70617273, .cases = 1 });
 }
 
 test "fuzz: a written patch round-trips" {
-    try std.testing.fuzz({}, support.fuzzed(support.patchOne), .{});
+    try shakedown.check(std.testing.allocator, {}, support.patchOne, .{ .seed = 0x726f756e, .cases = 1 });
 }
 
 test "parse takes any bytes, on seeded inputs" {
-    try support.seeded(support.parseOne, 0x70617273, 3000);
+    try shakedown.check(std.testing.allocator, {}, support.parseOne, .{ .seed = 0x70617273, .cases = 3000 });
 }
 
 test "a base shifted by inserted lines applies with that offset" {

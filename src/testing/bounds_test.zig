@@ -4,6 +4,7 @@
 //! and the deep inputs diff on a 64 KiB stack.
 
 const std = @import("std");
+const shakedown = @import("shakedown");
 const parallax = @import("../parallax.zig");
 const gen = @import("gen");
 const support = @import("support.zig");
@@ -213,7 +214,7 @@ fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: 
 }
 
 test "every allocation failure is survived without a leak" {
-    var fixed: support.NoResize = .{ .inner = std.testing.allocator };
+    var fixed: shakedown.alloc.NoResize = .init(std.testing.allocator);
     const gpa = fixed.allocator();
     const pair = try gen.w2(gpa, 120, 0.2);
     defer pair.deinit(gpa);

@@ -2,6 +2,7 @@
 //! and unified writer, on the new API.
 
 const std = @import("std");
+const shakedown = @import("shakedown");
 const parallax = @import("../parallax.zig");
 const support = @import("support.zig");
 
@@ -129,7 +130,7 @@ test "histogram agrees with myers on a plain replacement and falls back where no
     var h = try parallax.diffLines(gpa, "a\nb\nc\nd\ne\n", "a\nb\nX\nd\ne\n", .{ .algorithm = .histogram });
     defer h.deinit();
     try std.testing.expectEqualSlices(Change, &.{.{ .old_start = 2, .old_len = 1, .new_start = 2, .new_len = 1 }}, h.diff.changes);
-    const text = support.repeat("x\n", 200);
+    const text = shakedown.corpus.repeat("x\n", 200);
     var f = try parallax.diffLines(gpa, text, text[0 .. text.len - 2], .{ .algorithm = .histogram });
     defer f.deinit();
     try std.testing.expectEqual(parallax.Stat{ .added = 0, .removed = 1 }, f.diff.stat());
@@ -264,13 +265,13 @@ test "the heading on a hunk header is cut at eighty bytes" {
 }
 
 test "fuzz: any two inputs diff without a crash, and the script reproduces the new side" {
-    try std.testing.fuzz({}, support.fuzzed(support.diffOne), .{});
+    try shakedown.check(std.testing.allocator, {}, support.diffOne, .{ .seed = 0x64696666, .cases = 1 });
 }
 
 test "fuzz: lines of one comparison form always match, and matching is symmetric" {
-    try std.testing.fuzz({}, support.fuzzed(support.sameLineOne), .{});
+    try shakedown.check(std.testing.allocator, {}, support.sameLineOne, .{ .seed = 0x6c696e65, .cases = 1 });
 }
 
 test "fuzz: three-way merges never crash and an unchanged theirs keeps ours" {
-    try std.testing.fuzz({}, support.fuzzed(support.mergeOne), .{});
+    try shakedown.check(std.testing.allocator, {}, support.mergeOne, .{ .seed = 0x6d657267, .cases = 1 });
 }

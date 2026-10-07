@@ -137,10 +137,16 @@ fn raw(line: []const u8) ?Raw {
 }
 
 pub fn main(init: std.process.Init) !void {
+    const arena = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(arena);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--smoke")) return smoke(init);
+    return collect(init, args);
+}
+
+fn collect(init: std.process.Init, args: []const []const u8) !void {
     const gpa = init.gpa;
     const io = init.io;
     const arena = init.arena.allocator();
-    const args = try init.minimal.args.toSlice(arena);
     var repo: ?[]const u8 = null;
     var out_path: ?[]const u8 = null;
     var manifest_path: ?[]const u8 = null;
@@ -305,4 +311,47 @@ fn say(io: Io, comptime format: []const u8, args: anytype) void {
 fn nextRaw(it: *std.mem.SplitIterator(u8, .scalar)) ?Raw {
     while (it.next()) |line| if (raw(line)) |r| return r;
     return null;
+}
+
+// A fresh history exercises both the pair and three-way record writers.
+fn smoke(init: std.process.Init) !void {
+    const io = init.io;
+    const gpa = init.gpa;
+    const cwd = Io.Dir.cwd();
+    var repo = try cwd.createDirPathOpen(io, "repo", .{});
+    defer repo.close(io);
+    const git: Git = .{ .gpa = gpa, .io = io, .repo = "repo", .env = init.environ_map };
+    try command(git, &.{ "init", "--initial-branch=ours" });
+    try command(git, &.{ "config", "user.name", "Corpus fixture" });
+    try command(git, &.{ "config", "user.email", "fixture@example.invalid" });
+    try repo.writeFile(io, .{ .sub_path = "f", .data = "a\nb\n" });
+    try command(git, &.{ "add", "f" });
+    try command(git, &.{ "-c", "commit.gpgsign=false", "commit", "-m", "base" });
+    try command(git, &.{ "branch", "base" });
+    try command(git, &.{ "branch", "theirs" });
+    try repo.writeFile(io, .{ .sub_path = "f", .data = "A\nb\n" });
+    try command(git, &.{ "-c", "commit.gpgsign=false", "commit", "-am", "ours" });
+    try command(git, &.{ "checkout", "theirs" });
+    try repo.writeFile(io, .{ .sub_path = "f", .data = "a\nB\n" });
+    try command(git, &.{ "-c", "commit.gpgsign=false", "commit", "-am", "theirs" });
+    try command(git, &.{ "checkout", "ours" });
+    // Resolve the fixture explicitly: adjacent lines may conflict in git.
+    const theirs = try git.run(&.{ "rev-parse", "theirs" });
+    defer gpa.free(theirs);
+    try cwd.writeFile(io, .{ .sub_path = "repo/.git/MERGE_HEAD", .data = theirs });
+    try repo.writeFile(io, .{ .sub_path = "f", .data = "A\nB\n" });
+    try command(git, &.{ "add", "f" });
+    try command(git, &.{ "-c", "commit.gpgsign=false", "commit", "-m", "merge" });
+    try collect(init, &.{ "bench-corpus", "--repo", "repo", "--out", "out", "--range", "base..HEAD" });
+    const arena = init.arena.allocator();
+    const pairs = try cwd.readFileAlloc(io, "out/pairs", arena, .unlimited);
+    const triples = try cwd.readFileAlloc(io, "out/merges", arena, .unlimited);
+    // The records include their little-endian field lengths.
+    if (pairs.len != 32 or triples.len != 24) return error.SmokeFailed;
+    const manifest = try cwd.readFileAlloc(io, "out/manifest", arena, .unlimited);
+    if (std.mem.find(u8, manifest, "pairs: 2\n") == null or std.mem.find(u8, manifest, "triples: 1\n") == null) return error.SmokeFailed;
+}
+
+fn command(git: Git, args: []const []const u8) !void {
+    git.gpa.free(try git.run(args));
 }

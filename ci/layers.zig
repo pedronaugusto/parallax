@@ -81,6 +81,7 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "reversed.corpus",
         "cleanup.corpus",
         "gen",
+        "shakedown",
         "builtin",
     } },
     .{ .name = "source siblings", .suffix = ".zig", .relative = true, .except_targets = &.{"src/**"} },

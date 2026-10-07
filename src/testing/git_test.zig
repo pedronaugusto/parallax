@@ -5,9 +5,9 @@
 //! markers read back as git's rerere reads them.
 
 const std = @import("std");
+const shakedown = @import("shakedown");
 const parallax = @import("../parallax.zig");
 const corpus = @import("corpus.zig");
-const support = @import("support.zig");
 
 const diff_corpus = @embedFile("diff.corpus");
 const unified_corpus = @embedFile("unified.corpus");
@@ -372,7 +372,7 @@ test "a marker alone on its line is read too, as write writes it for an empty la
 }
 
 test "markers nested deeper than 64 are refused, and the line of a bad marker is told" {
-    const deep = support.repeat("<<<<<<< x\n", 65);
+    const deep = shakedown.corpus.repeat("<<<<<<< x\n", 65);
     var it = parallax.merge.parseMarkers(deep, .{});
     try std.testing.expectError(error.TooDeep, it.next());
     var bad = parallax.merge.parseMarkers("x\n<<<<<<< a\n1\n=======\n2\n||||||| b\n", .{});

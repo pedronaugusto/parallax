@@ -1,92 +1,59 @@
-//! Helpers the tests share: where random choices come from, input
-//! generators, and the properties every diff and merge must have. The
-//! properties run on seeded inputs in every `zig build test` and under the
-//! fuzzer with `zig build test --fuzz`.
+//! Diff and merge assertions, with domain inputs composed from shakedown.gen.
+//! shakedown.check runs, shrinks and replays these properties and feeds the fuzzer.
 
 const std = @import("std");
 const parallax = @import("../parallax.zig");
 const compare = @import("../compare.zig");
 
-const Smith = std.testing.Smith;
+const shakedown = @import("shakedown");
+const gen = shakedown.gen;
 const Change = parallax.Change;
 
-/// Where choices come from.
-pub const Source = union(enum) {
-    smith: *Smith,
-    random: std.Random,
+const pieces = [_][]const u8{ "a", "b", "c", " ", "\t", "\r", "{", "}", "  x", "A" };
+const Line = struct { count: u2, parts: [3][]const u8 };
 
-    /// A number below `n`, which must not be zero.
-    pub fn index(s: Source, n: usize) usize {
-        return switch (s) {
-            .smith => |smith| smith.index(n),
-            .random => |r| r.uintLessThan(usize, n),
-        };
-    }
-
-    /// True about once in `n`.
-    pub fn oneIn(s: Source, n: u64) bool {
-        return switch (s) {
-            .smith => |smith| smith.eosWeightedSimple(n - 1, 1),
-            .random => |r| r.uintLessThan(u64, n) == 0,
-        };
-    }
-
-    pub fn boolean(s: Source) bool {
-        return s.index(2) == 1;
-    }
-};
-
-/// Adapts a property over a `Source` to `std.testing.fuzz`.
-pub fn fuzzed(comptime one: fn (Source) anyerror!void) fn (void, *Smith) anyerror!void {
-    return struct {
-        fn run(_: void, smith: *Smith) anyerror!void {
-            return one(.{ .smith = smith });
-        }
-    }.run;
+fn drawLine(s: *shakedown.Source) Line {
+    return .{ .count = gen.intRange(s, u2, 0, 3), .parts = .{
+        gen.oneOf(s, []const u8, &pieces),
+        gen.oneOf(s, []const u8, &pieces),
+        gen.oneOf(s, []const u8, &pieces),
+    } };
 }
 
-/// Runs `one` on `count` inputs from a seeded generator.
-pub fn seeded(comptime one: fn (Source) anyerror!void, seed: u64, count: usize) !void {
-    var prng: std.Random.DefaultPrng = .init(seed);
-    for (0..count) |_| try one(.{ .random = prng.random() });
-}
-
-/// Lines from a few pieces, so that equal lines are common; whitespace and
-/// carriage returns in the mix, and sometimes no final newline.
-pub fn text(s: Source, buf: []u8) []u8 {
-    const pieces = [_][]const u8{ "a", "b", "c", " ", "\t", "\r", "{", "}", "  x", "A" };
+// Domain syntax assembled from shakedown's bounded, shrinkable list draws.
+fn drawText(case: *shakedown.Case, buf: []u8) ![]u8 {
+    const lines = try gen.slice(case.source, Line, drawLine, case.gpa, .{ .average = 23, .max_len = buf.len });
     var len: usize = 0;
-    while (!s.oneIn(24)) {
-        const n = s.index(4);
-        if (len + n * 3 + 1 > buf.len) break;
-        for (0..n) |_| {
-            const p = pieces[s.index(pieces.len)];
-            @memcpy(buf[len..][0..p.len], p);
-            len += p.len;
+    for (lines) |line| {
+        if (len + @as(usize, line.count) * 3 + 1 > buf.len) break;
+        for (line.parts[0..line.count]) |part| {
+            @memcpy(buf[len..][0..part.len], part);
+            len += part.len;
         }
         buf[len] = '\n';
         len += 1;
     }
-    if (len != 0 and s.oneIn(4)) len -= 1;
+    if (len != 0 and gen.weighted(case.source, &.{ 3, 1 }) == 1) len -= 1;
     return buf[0..len];
 }
 
-/// An edit of `base`: lines dropped, replaced, inserted or kept.
-pub fn edit(s: Source, base: []const u8, buf: []u8) []u8 {
+fn drawEdit(case: *shakedown.Case, base: []const u8, buf: []u8) []u8 {
     const others = [_][]const u8{ "x\n", "y\n", "a\n", "{\n", "}\n", "a \n" };
     var len: usize = 0;
     var it = std.mem.splitScalar(u8, base, '\n');
     while (it.next()) |line| {
         const last = it.peek() == null;
         if (last and line.len == 0) break;
-        const choice = s.index(8);
-        if (choice == 0) continue;
-        if (choice == 1 or choice == 2) {
-            const o = others[s.index(others.len)];
+        const mark = case.source.begin();
+        defer case.source.end(mark);
+        const choice = gen.weighted(case.source, &.{ 5, 1, 1, 1 });
+        if (choice == 1) continue;
+        if (choice == 2 or choice == 3) {
+            const o = gen.oneOf(case.source, []const u8, &others);
             if (len + o.len > buf.len) break;
             @memcpy(buf[len..][0..o.len], o);
             len += o.len;
-            if (choice == 1) continue;
+            if (choice == 2) continue;
         }
         if (len + line.len + 1 > buf.len) break;
         @memcpy(buf[len..][0..line.len], line);
@@ -99,19 +66,17 @@ pub fn edit(s: Source, base: []const u8, buf: []u8) []u8 {
     return buf[0..len];
 }
 
-pub fn options(s: Source) parallax.Options {
-    const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
-    const caps = [_]u32{ 0, 0, 0, 1, 3, 20 };
+fn options(s: *shakedown.Source) parallax.Options {
     return .{
-        .algorithm = algorithms[s.index(algorithms.len)],
-        .minimal = s.oneIn(3),
-        .indent_heuristic = !s.oneIn(3),
+        .algorithm = gen.enumValue(s, parallax.Algorithm),
+        .minimal = gen.weighted(s, &.{ 2, 1 }) == 1,
+        .indent_heuristic = gen.weighted(s, &.{ 1, 2 }) == 1,
         .compare = .{
-            .whitespace = .{ .all = s.oneIn(5), .change = s.oneIn(5), .at_eol = s.oneIn(5), .cr_at_eol = s.oneIn(5) },
-            .ignore_case = s.oneIn(5),
+            .whitespace = .{ .all = gen.weighted(s, &.{ 4, 1 }) == 1, .change = gen.weighted(s, &.{ 4, 1 }) == 1, .at_eol = gen.weighted(s, &.{ 4, 1 }) == 1, .cr_at_eol = gen.weighted(s, &.{ 4, 1 }) == 1 },
+            .ignore_case = gen.weighted(s, &.{ 4, 1 }) == 1,
         },
-        .max_work = caps[s.index(caps.len)],
-        .anchors = if (s.oneIn(4)) &.{ "a", "{" } else &.{},
+        .max_work = gen.oneOf(s, u32, &.{ 0, 0, 0, 1, 3, 20 }),
+        .anchors = if (gen.weighted(s, &.{ 3, 1 }) == 1) &.{ "a", "{" } else &.{},
     };
 }
 
@@ -148,25 +113,26 @@ fn expectSameRun(d: parallax.Diff, old: u32, new: u32, n: u32) !void {
 
 /// One random pair under random options: the script applies, the hunks
 /// cover every change once, and a minimal script is never longer.
-pub fn diffOne(s: Source) !void {
+pub fn diffOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
     const gpa = std.testing.allocator;
     var a_buf: [256]u8 = undefined;
     var b_buf: [320]u8 = undefined;
-    const old = text(s, &a_buf);
-    const new = if (s.oneIn(3)) text(s, &b_buf) else edit(s, old, &b_buf);
+    const old = try drawText(case, &a_buf);
+    const new = if (gen.weighted(s, &.{ 2, 1 }) == 1) try drawText(case, &b_buf) else drawEdit(case, old, &b_buf);
     var o = options(s);
     // A stop flag raised before the call: the script is coarse, and still
     // applies.
     const raised: std.atomic.Value(bool) = .init(true);
-    if (s.oneIn(6)) o.stop = &raised;
+    if (gen.weighted(s, &.{ 5, 1 }) == 1) o.stop = &raised;
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     const diff = try d.lines(old, new, o);
     try expectApplies(diff);
     const hunk_options: parallax.HunkOptions = .{
-        .context = @intCast(s.index(4)),
-        .inter_hunk_context = @intCast(s.index(3)),
-        .ignore_blank_lines = s.oneIn(4),
+        .context = @intCast(gen.intRange(s, usize, 0, 3)),
+        .inter_hunk_context = @intCast(gen.intRange(s, usize, 0, 2)),
+        .ignore_blank_lines = gen.weighted(s, &.{ 3, 1 }) == 1,
     };
     try expectHunks(diff, hunk_options);
     // Whole functions: the same, except that a hunk may overlap the one
@@ -217,9 +183,10 @@ fn expectHunks(diff: parallax.Diff, hunk_options: parallax.HunkOptions) !void {
 
 /// Two random lines under every comparison: one form means a match, and
 /// matching is symmetric and reflexive.
-pub fn sameLineOne(s: Source) !void {
+pub fn sameLineOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
     var buf: [64]u8 = undefined;
-    const t = text(s, &buf);
+    const t = try drawText(case, &buf);
     var lines = std.mem.splitScalar(u8, t, '\n');
     const first = lines.next() orelse "";
     const second = lines.next() orelse "";
@@ -227,7 +194,7 @@ pub fn sameLineOne(s: Source) !void {
     // Some with their newline, some without.
     var withnl: [2][80]u8 = undefined;
     for (&pair, 0..) |*l, i| {
-        if (s.boolean() and l.len < 79) {
+        if (gen.boolean(s) and l.len < 79) {
             @memcpy(withnl[i][0..l.len], l.*);
             withnl[i][l.len] = '\n';
             l.* = withnl[i][0 .. l.len + 1];
@@ -253,31 +220,32 @@ pub fn sameLineOne(s: Source) !void {
     }
 }
 
-pub fn mergeOptions(s: Source) parallax.merge.Options {
+fn mergeOptions(s: *shakedown.Source) parallax.merge.Options {
     const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
     return .{
-        .algorithm = algorithms[s.index(algorithms.len)],
-        .minimal = s.oneIn(3),
-        .compare = .{ .whitespace = .{ .change = s.oneIn(5), .cr_at_eol = s.oneIn(5) } },
-        .style = @fromBackingInt(@intCast(s.index(3))),
-        .level = @fromBackingInt(@intCast(s.index(4))),
+        .algorithm = algorithms[gen.intRange(s, usize, 0, algorithms.len - 1)],
+        .minimal = gen.weighted(s, &.{ 2, 1 }) == 1,
+        .compare = .{ .whitespace = .{ .change = gen.weighted(s, &.{ 4, 1 }) == 1, .cr_at_eol = gen.weighted(s, &.{ 4, 1 }) == 1 } },
+        .style = @fromBackingInt(@intCast(gen.intRange(s, usize, 0, 2))),
+        .level = @fromBackingInt(@intCast(gen.intRange(s, usize, 0, 3))),
     };
 }
 
 /// Three random texts: the merge runs, its regions cover ours in order, an
 /// unchanged side yields the other, resolving to one side leaves no marker,
 /// and the markers read back give each side's resolution.
-pub fn mergeOne(s: Source) !void {
+pub fn mergeOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
     const gpa = std.testing.allocator;
     var bufs: [3][256]u8 = undefined;
-    var base = text(s, &bufs[0]);
+    var base = try drawText(case, &bufs[0]);
     // Whole lines only, so markers sit on lines of their own.
     if (base.len != 0 and base[base.len - 1] != '\n') {
         bufs[0][base.len] = '\n';
         base = bufs[0][0 .. base.len + 1];
     }
-    const ours = edit(s, base, &bufs[1]);
-    const theirs = edit(s, base, &bufs[2]);
+    const ours = drawEdit(case, base, &bufs[1]);
+    const theirs = drawEdit(case, base, &bufs[2]);
     const o = mergeOptions(s);
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
@@ -397,40 +365,30 @@ fn expectSequenceMerge(d: *parallax.Differ, m: parallax.merge.Merge, o: parallax
     try std.testing.expectEqualSlices(parallax.merge.Region, regions, sequence.regions);
 }
 
-/// `text` written `times` times, at compile time.
-pub inline fn repeat(comptime bytes: []const u8, comptime times: usize) *const [bytes.len * times]u8 {
-    comptime {
-        @setEvalBranchQuota(4 * bytes.len * times + 1000);
-        var out: [bytes.len * times]u8 = undefined;
-        for (0..times) |i| @memcpy(out[i * bytes.len ..][0..bytes.len], bytes);
-        const final = out;
-        return &final;
-    }
-}
-
 /// One random diff, every change refined: the spans tile the change's
 /// lines on each side, none crosses a line end, the unchanged spans read the
 /// same on both sides, and a change with an empty side gives one changed
 /// span per line.
-pub fn refineOne(s: Source) !void {
+pub fn refineOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
     const gpa = std.testing.allocator;
     var a_buf: [256]u8 = undefined;
     var b_buf: [320]u8 = undefined;
-    const old = text(s, &a_buf);
-    const new = edit(s, old, &b_buf);
+    const old = try drawText(case, &a_buf);
+    const new = drawEdit(case, old, &b_buf);
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     const diff = try d.lines(old, new, .{});
-    const tokens: parallax.Tokens = @fromBackingInt(@intCast(s.index(3)));
+    const tokens: parallax.Tokens = @fromBackingInt(@intCast(gen.intRange(s, usize, 0, 2)));
     const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
-    const ignore = s.oneIn(3);
+    const ignore = gen.weighted(s, &.{ 2, 1 }) == 1;
     for (diff.changes) |c| {
         const r = try d.refine(diff, c, .{
             .tokens = tokens,
-            .algorithm = algorithms[s.index(3)],
+            .algorithm = algorithms[gen.intRange(s, usize, 0, 2)],
             .compare = if (ignore) .{ .ignore_case = true } else .{},
-            .cleanup = @fromBackingInt(@intCast(s.index(3))),
-            .edit_cost = @intCast(1 + s.index(6)),
+            .cleanup = @fromBackingInt(@intCast(gen.intRange(s, usize, 0, 2))),
+            .edit_cost = @intCast(1 + gen.intRange(s, usize, 0, 5)),
         });
         try expectTiles(diff.old, c.old_start, c.old_len, r.old, c.new_len == 0);
         try expectTiles(diff.new, c.new_start, c.new_len, r.new, c.old_len == 0);
@@ -461,23 +419,24 @@ fn expectTiles(lines: parallax.Lines, start: u32, len: u32, spans: []const paral
 }
 
 /// Random id sequences under every algorithm: the script applies.
-pub fn sequenceOne(s: Source) !void {
+pub fn sequenceOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
     const gpa = std.testing.allocator;
     var old: [64]u32 = undefined;
     var new: [64]u32 = undefined;
-    const classes: u32 = @intCast(1 + s.index(8));
-    const n_old = s.index(old.len);
-    const n_new = s.index(new.len);
-    for (old[0..n_old]) |*id| id.* = @intCast(s.index(classes));
-    for (new[0..n_new], 0..) |*id, i| id.* = if (i < n_old and !s.oneIn(3)) old[i] else @intCast(s.index(classes));
+    const classes: u32 = @intCast(1 + gen.intRange(s, usize, 0, 7));
+    const n_old = gen.intRange(s, usize, 0, old.len - 1);
+    const n_new = gen.intRange(s, usize, 0, new.len - 1);
+    for (old[0..n_old]) |*id| id.* = @intCast(gen.intRange(s, usize, 0, classes - 1));
+    for (new[0..n_new], 0..) |*id, i| id.* = if (i < n_old and !(gen.weighted(s, &.{ 2, 1 }) == 1)) old[i] else @intCast(gen.intRange(s, usize, 0, classes - 1));
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
     const changes = try d.sequences(old[0..n_old], new[0..n_new], .{
         .classes = classes,
-        .algorithm = algorithms[s.index(3)],
-        .minimal = s.boolean(),
-        .max_work = if (s.oneIn(4)) 2 else 0,
+        .algorithm = algorithms[gen.intRange(s, usize, 0, 2)],
+        .minimal = gen.boolean(s),
+        .max_work = if (gen.weighted(s, &.{ 3, 1 }) == 1) 2 else 0,
     });
     var at_old: u32 = 0;
     var at_new: u32 = 0;
@@ -489,52 +448,24 @@ pub fn sequenceOne(s: Source) !void {
     try std.testing.expectEqualSlices(u32, old[at_old..n_old], new[at_new..n_new]);
 }
 
-/// An allocator that never grows or moves memory in place, so the number
-/// of allocations a call makes is the same on every run: the backing for
-/// `std.testing.checkAllAllocationFailures`.
-pub const NoResize = struct {
-    inner: std.mem.Allocator,
-
-    pub fn allocator(n: *NoResize) std.mem.Allocator {
-        return .{ .ptr = n, .vtable = &.{ .alloc = alloc, .resize = resize, .remap = remap, .free = free } };
-    }
-
-    fn alloc(ctx: *anyopaque, len: usize, a: std.mem.Alignment, ra: usize) ?[*]u8 {
-        const n: *NoResize = @ptrCast(@alignCast(ctx)); // safe: ctx is the NoResize this allocator was made from
-        return n.inner.rawAlloc(len, a, ra);
-    }
-
-    fn resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
-        return false;
-    }
-
-    fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
-        return null;
-    }
-
-    fn free(ctx: *anyopaque, m: []u8, a: std.mem.Alignment, ra: usize) void {
-        const n: *NoResize = @ptrCast(@alignCast(ctx)); // safe: ctx is the NoResize this allocator was made from
-        n.inner.rawFree(m, a, ra);
-    }
-};
-
 /// A random diff written as a patch: it parses back to its own hunks and
 /// applies to the old side to give the new, and backwards.
-pub fn patchOne(s: Source) !void {
+pub fn patchOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
     const gpa = std.testing.allocator;
     var a_buf: [256]u8 = undefined;
     var b_buf: [320]u8 = undefined;
-    const old = text(s, &a_buf);
-    const new = if (s.oneIn(4)) text(s, &b_buf) else edit(s, old, &b_buf);
+    const old = try drawText(case, &a_buf);
+    const new = if (gen.weighted(s, &.{ 3, 1 }) == 1) try drawText(case, &b_buf) else drawEdit(case, old, &b_buf);
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
-    const diff = try d.lines(old, new, .{ .algorithm = algorithms[s.index(3)] });
+    const diff = try d.lines(old, new, .{ .algorithm = algorithms[gen.intRange(s, usize, 0, 2)] });
     var written: std.Io.Writer.Allocating = .init(gpa);
     defer written.deinit();
     try parallax.writeUnified(&written.writer, diff, .{
-        .hunks = .{ .context = @intCast(s.index(6)), .inter_hunk_context = @intCast(s.index(3)) },
-        .heading = if (s.boolean()) .c_function else null,
+        .hunks = .{ .context = @intCast(gen.intRange(s, usize, 0, 5)), .inter_hunk_context = @intCast(gen.intRange(s, usize, 0, 2)) },
+        .heading = if (gen.boolean(s)) .c_function else null,
         .files = .{ .old = "a/f", .new = "b/f" },
     });
     var p = try parallax.patch.parse(gpa, written.written(), .{});
@@ -566,16 +497,21 @@ pub fn patchOne(s: Source) !void {
 
 /// Patch-shaped bytes: the parse returns a patch or one of its own errors,
 /// and every hunk it returns holds the lines its header counts.
-pub fn parseOne(s: Source) !void {
-    const pieces = [_][]const u8{
+pub fn parseOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
+    const syntax = [_][]const u8{
         "--- a/f\n", "+++ b/f\n",                      "@@ -1,2 +1 @@\n",      "@@ -0,0 +1 @@ h\n", "@@ -1 +1,2 @@\n", " a\n", "-b\n",
         "+c\n",      "\\ No newline at end of file\n", "diff --git a/f b/f\n", "\n",                "x\n",             "@@ -", "+++ ",
         "--- ",
     };
+    const fragments = try gen.slice(s, []const u8, struct {
+        fn draw(source: *shakedown.Source) []const u8 {
+            return gen.oneOf(source, []const u8, &syntax);
+        }
+    }.draw, case.gpa, .{ .average = 39, .max_len = 512 });
     var buf: [512]u8 = undefined;
     var len: usize = 0;
-    while (!s.oneIn(40)) {
-        const p = pieces[s.index(pieces.len)];
+    for (fragments) |p| {
         if (len + p.len > buf.len) break;
         @memcpy(buf[len..][0..p.len], p);
         len += p.len;
@@ -603,21 +539,26 @@ pub fn parseOne(s: Source) !void {
 
 /// Marker-shaped bytes: the parts tile the text, a conflict's pieces lie
 /// inside it in order, and only the iterator's own errors come back.
-pub fn markersOne(s: Source) !void {
-    const pieces = [_][]const u8{
+pub fn markersOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
+    const syntax = [_][]const u8{
         "<<<<<<< a\n", "<<<<<<<\n", "|||||||\n", "||||||| b\n", "=======\n", "=======\r\n",  ">>>>>>> c\n",
         ">>>>>>>\n",   "<<<\n",     "x\n",       "y",           "\n",        "<<<<<<<< z\n", "=",
     };
+    const fragments = try gen.slice(s, []const u8, struct {
+        fn draw(source: *shakedown.Source) []const u8 {
+            return gen.oneOf(source, []const u8, &syntax);
+        }
+    }.draw, case.gpa, .{ .average = 29, .max_len = 512 });
     var buf: [512]u8 = undefined;
     var len: usize = 0;
-    while (!s.oneIn(30)) {
-        const p = pieces[s.index(pieces.len)];
+    for (fragments) |p| {
         if (len + p.len > buf.len) break;
         @memcpy(buf[len..][0..p.len], p);
         len += p.len;
     }
     const marked = buf[0..len];
-    var it = parallax.merge.parseMarkers(marked, .{ .marker_size = if (s.oneIn(4)) 3 else 7 });
+    var it = parallax.merge.parseMarkers(marked, .{ .marker_size = if (gen.weighted(s, &.{ 3, 1 }) == 1) 3 else 7 });
     var at: usize = 0;
     while (true) {
         const part = it.next() catch |err| switch (err) {

@@ -1,6 +1,7 @@
 //! Generic sequences, the interner, and inline refinement.
 
 const std = @import("std");
+const shakedown = @import("shakedown");
 const parallax = @import("../parallax.zig");
 const support = @import("support.zig");
 
@@ -102,15 +103,15 @@ test "refinement by characters, under a comparison, and of a pure insertion" {
 }
 
 test "refined spans tile each line and change only where the tokens differ" {
-    try support.seeded(support.refineOne, 0x72656669, 2000);
+    try shakedown.check(std.testing.allocator, {}, support.refineOne, .{ .seed = 0x72656669, .cases = 2000 });
 }
 
 test "fuzz: refinement tiles every change" {
-    try std.testing.fuzz({}, support.fuzzed(support.refineOne), .{});
+    try shakedown.check(std.testing.allocator, {}, support.refineOne, .{ .seed = 0x72656669, .cases = 1 });
 }
 
 test "sequences under every algorithm apply" {
-    try support.seeded(support.sequenceOne, 0x73657175, 2000);
+    try shakedown.check(std.testing.allocator, {}, support.sequenceOne, .{ .seed = 0x73657175, .cases = 2000 });
 }
 
 test "the semantic cleanup puts an edit on a word, and the efficiency cleanup joins close edits" {
