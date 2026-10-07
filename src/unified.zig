@@ -10,24 +10,7 @@ const compare = @import("compare.zig");
 const Lines = @import("lines.zig").Lines;
 
 /// The text after a hunk's second `@@`.
-pub const Heading = struct {
-    context: ?*const anyopaque = null,
-    /// Given an old-side line without its newline: the text to show, or
-    /// null when the line starts nothing.
-    find: *const fn (context: ?*const anyopaque, line: []const u8) ?[]const u8,
-    /// Longer text is cut here, then its trailing whitespace dropped.
-    max_len: u32 = 80,
-
-    /// First byte a letter, '_' or '$': git's default rule and GNU diff -p.
-    pub const c_function: Heading = .{ .find = cFunction };
-
-    fn cFunction(_: ?*const anyopaque, line: []const u8) ?[]const u8 {
-        if (line.len == 0) return null;
-        const first = line[0];
-        if (std.ascii.isAlphabetic(first) or first == '_' or first == '$') return line;
-        return null;
-    }
-};
+pub const Heading = hunks_mod.Heading;
 
 pub const UnifiedOptions = struct {
     hunks: hunks_mod.HunkOptions = .{},
@@ -70,10 +53,13 @@ pub fn writeUnified(w: *Io.Writer, diff: Diff, options: UnifiedOptions) Io.Write
         }
         try w.writeByte('\n');
 
-        var old_at = hunk.old_start;
+        // The context before the first change is the new side's, counted
+        // there, as git prints it; between changes both sides step.
         var new_at = hunk.new_start;
+        while (new_at < hunk.changes[0].new_start) : (new_at += 1) try writeLine(w, ' ', diff.new.get(new_at));
+        var old_at = hunk.changes[0].old_start;
         for (hunk.changes) |c| {
-            while (old_at < c.old_start) {
+            while (old_at < c.old_start and new_at < c.new_start) {
                 try writeLine(w, ' ', diff.new.get(new_at));
                 old_at += 1;
                 new_at += 1;

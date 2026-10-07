@@ -76,7 +76,30 @@ pub const Context = struct {
     max_work: u64,
     /// Work units spent, over every search the diff makes.
     work: u64 = 0,
+    /// A caller's flag: once it reads true, what is left is described
+    /// coarsely, as when `max_work` runs out.
+    stop: ?*const std.atomic.Value(bool) = null,
     buffers: *Buffers,
+
+    /// Whether the caller has asked the diff to stop. Read once per work
+    /// unit and once per region.
+    pub fn stopped(c: *const Context) bool {
+        const flag = c.stop orelse return false;
+        return flag.load(.monotonic);
+    }
+
+    /// Whether a cap or a stop flag can end the search early. Neither is,
+    /// most of the time, and then a work unit costs one test of this.
+    fn bounded(c: *const Context) bool {
+        return c.max_work != 0 or c.stop != null;
+    }
+
+    /// Whether the cap is reached or the caller asked to stop: the search
+    /// ends here.
+    noinline fn exhausted(c: *const Context) bool {
+        @branchHint(.cold);
+        return (c.max_work != 0 and c.work >= c.max_work) or c.stopped();
+    }
 
     /// Make the id-indexed arrays fit `classes`. Called once per diff.
     pub fn prepare(c: *Context) Allocator.Error!void {
@@ -355,7 +378,8 @@ fn Search(comptime Int: type) type {
 
         /// Where the edit script through this box crosses it: run the greedy
         /// search from both corners until the frontiers touch, or until one
-        /// of git's give-up rules fires. Null when `max_work` ran out.
+        /// of git's give-up rules fires. Null when `max_work` ran out or the
+        /// caller asked the diff to stop.
         fn middleSnake(s: *Self, off1: u32, lim1: u32, off2: u32, lim2: u32, need_min: bool) ?Split {
             const c = s.context;
             const o1: Int = @intCast(off1);
@@ -378,9 +402,10 @@ fn Search(comptime Int: type) type {
             s.setF(fmid, o1);
             s.setB(bmid, l1);
 
+            const bounded = c.bounded();
             var ec: u64 = 1;
             while (true) : (ec += 1) {
-                if (c.max_work != 0 and c.work >= c.max_work) return null;
+                if (bounded and c.exhausted()) return null;
                 c.work += 1;
                 var got_snake = false;
 

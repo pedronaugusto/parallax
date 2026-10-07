@@ -1,5 +1,5 @@
 //! parallax's own workloads, timed: `zig build bench [-- --smoke] [-- --json]
-//! [-- --runs N] [-- --only W1,W5]`.
+//! [-- --runs N] [-- --only W1,W5] [-- --corpus DIR]`.
 //!
 //! Each workload runs on parallax with one reused `Differ`, and, as the A/B
 //! baseline, on the code parallax replaces (`baseline/`, relic's line diff
@@ -7,15 +7,23 @@
 //! baseline's time over parallax's: above 1 is parallax faster.
 //!
 //! - W1: 1M lines, ten edits; W2: 1M lines, 10% and 50% edited;
-//! - W3a-W3f: the adversarial shapes;
+//! - W3a-W3f: the adversarial shapes; W2 and W3b again with a stop flag
+//!   that is never raised, for what reading it costs;
+//! - W4: every changed file of a real history (`--corpus`, made by
+//!   `zig build bench-corpus`), per-file latency and allocations; W4L: the
+//!   files of 1 MB and more; W7a: the merges of its merge commits;
 //! - W5: 100k small files through one workspace, p50 and p99 per call, and
 //!   allocations per call;
 //! - W6: W2 at 10% under -w, -b and --ignore-cr-at-eol (CRLF copies);
-//! - W7b: a conflict per ten lines, every style; W7c: many insertions at
-//!   the same places.
-//! - W8: every replace of W2 at 10% refined by words and by characters.
+//! - W7b: a conflict per ten lines, every style, also over interned ids,
+//!   and its markers read back; W7c: many insertions at the same places.
+//! - W8: every replace of W2 at 10% refined by words and by characters,
+//!   plain and with each cleanup.
 //! - W9: the W5 pairs written as patches, parsed, and applied to the old side
-//!   as it is, shifted by inserted lines, and with context changed (fuzz 2).
+//!   as it is, shifted by inserted lines, and with context changed (fuzz 2);
+//!   then applied to the new side with the reversed hint.
+//! - W10: a C-shaped file with one function in ten edited, written as a
+//!   unified diff with plain hunks and with whole functions.
 //!
 //! Timings are wall-clock on this machine; CI only compiles this file.
 const std = @import("std");
@@ -53,6 +61,8 @@ const Config = struct {
     smoke: bool = false,
     runs: usize = 5,
     only: ?[]const u8 = null,
+    /// A directory `zig build bench-corpus` wrote.
+    corpus: ?[]const u8 = null,
 
     fn wants(c: Config, name: []const u8) bool {
         const only = c.only orelse return true;
@@ -118,6 +128,9 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, arg, "--only") and i + 1 < args.len) {
             i += 1;
             config.only = args[i];
+        } else if (std.mem.eql(u8, arg, "--corpus") and i + 1 < args.len) {
+            i += 1;
+            config.corpus = args[i];
         } else return error.UnknownArgument;
     }
     var buffer: [4096]u8 = undefined;
@@ -151,12 +164,56 @@ pub fn main(init: std.process.Init) !void {
         };
         defer for (shapes) |s| s.pair.deinit(gpa);
         for (shapes) |s| try pair(r, gpa, &d, config, s.name, s.pair, &.{ .myers, .histogram });
+        try stopRows(r, gpa, &d, config, large, shapes[1].pair);
+    }
+    if (config.corpus) |dir| {
+        if (config.wants("W4")) try real(r, gpa, init.io, config, dir);
+        if (config.wants("W7a")) try realMerges(r, gpa, init.io, config, dir);
     }
     if (config.wants("W5")) try small(r, gpa, config);
     if (config.wants("W6")) try whitespace(r, gpa, &d, config, large);
     if (config.wants("W7")) try merges(r, gpa, &d, config);
     if (config.wants("W8")) try inline_(r, gpa, &d, config, large);
     if (config.wants("W9")) try patches(r, gpa, config);
+    if (config.wants("W10")) try functions(r, gpa, &d, config);
+}
+
+/// W2 at 10% and W3b again with a stop flag that is never raised: what
+/// reading it once per work unit costs.
+fn stopRows(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines: usize, w3b: gen.Pair) !void {
+    const w2 = try gen.w2(gpa, lines, 0.1);
+    defer w2.deinit(gpa);
+    const flag: std.atomic.Value(bool) = .init(false);
+    for ([_]struct { []const u8, gen.Pair }{ .{ "W2 10%", w2 }, .{ "W3b", w3b } }) |case| {
+        const plain = try timeLines(r, d, config, case[1], .{});
+        const watched = try timeLines(r, d, config, case[1], .{ .stop = &flag });
+        try r.line(case[0], "myers", "no flag", plain / 1e6, "ms");
+        try r.line(case[0], "myers", "stop flag", watched / 1e6, "ms");
+        try r.line(case[0], "myers", "flag cost", (watched - plain) / plain * 100, "%");
+    }
+}
+
+/// W10: whole-function hunks against plain ones, on a C-shaped file.
+fn functions(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void {
+    const p = try gen.w10(gpa, if (config.smoke) 50 else 20_000);
+    defer p.deinit(gpa);
+    const diff = try d.lines(p.old, p.new, .{});
+    for ([_]struct { []const u8, ?parallax.Heading }{ .{ "plain", null }, .{ "-W", .c_function } }) |case| {
+        var best: f64 = std.math.inf(f64);
+        var written: usize = 0;
+        for (0..config.runs + 1) |run| {
+            var discard_buffer: [4096]u8 = undefined;
+            var discard: Io.Writer.Discarding = .init(&discard_buffer);
+            const t0 = r.now();
+            try parallax.writeUnified(&discard.writer, diff, .{ .heading = .c_function, .hunks = .{ .function_context = case[1] } });
+            try discard.writer.flush();
+            const t1 = r.now();
+            written = @intCast(discard.fullCount());
+            if (run != 0) best = @min(best, ns(t0, t1));
+        }
+        try r.line("W10", case[0], "unified", best / 1e6, "ms");
+        try r.line("W10", case[0], "written", @as(f64, @floatFromInt(written)) / 1e6, "MB");
+    }
 }
 
 /// One pair under each algorithm, parallax then the baseline.
@@ -312,22 +369,25 @@ fn inline_(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines
         replaces += 1;
         bytes += diff.old.span(c.old_start, c.old_len).len + diff.new.span(c.new_start, c.new_len).len;
     };
-    for ([_]parallax.Tokens{ .words, .chars }) |tokens| {
+    for ([_]parallax.Tokens{ .words, .chars }) |tokens| for ([_]parallax.Cleanup{ .none, .semantic, .efficiency }) |cleanup| {
         var best: f64 = std.math.inf(f64);
         for (0..config.runs + 1) |run| {
             const t0 = r.now();
             for (diff.changes) |c| if (c.old_len != 0 and c.new_len != 0) {
-                const refined = try d.refine(diff, c, .{ .tokens = tokens });
+                const refined = try d.refine(diff, c, .{ .tokens = tokens, .cleanup = cleanup });
                 std.mem.doNotOptimizeAway(refined.old.len);
             };
             const t1 = r.now();
             if (run != 0) best = @min(best, ns(t0, t1));
         }
         var label_buf: [32]u8 = undefined;
-        const label = try std.fmt.bufPrint(&label_buf, "{t}", .{tokens});
+        const label = if (cleanup == .none)
+            try std.fmt.bufPrint(&label_buf, "{t}", .{tokens})
+        else
+            try std.fmt.bufPrint(&label_buf, "{t} {t}", .{ tokens, cleanup });
         try r.line("W8", label, "per change", best / @as(f64, @floatFromInt(@max(replaces, 1))) / 1e3, "us");
         try r.line("W8", label, "throughput", @as(f64, @floatFromInt(bytes)) / 1e6 / (best / 1e9), "MB/s");
-    }
+    };
 }
 
 /// W7: merges, parallax writing into a discarding writer, against the
@@ -374,6 +434,64 @@ fn merges(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void 
             try r.line(case.name, label, "A/B", base_best / best, "x");
         }
     }
+    try mergeExtras(r, gpa, d, config, triples[0].t);
+}
+
+/// W7b over interned line ids, against the line merge, and its markers read
+/// back.
+fn mergeExtras(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, t: gen.Triple) !void {
+    var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
+    defer interner.deinit();
+    var ids: [3][]u32 = undefined;
+    var made: usize = 0;
+    defer for (ids[0..made]) |side| gpa.free(side);
+    for (&ids, [_][]const u8{ t.base, t.ours, t.theirs }) |*side, text| {
+        var list: std.ArrayList(u32) = .empty;
+        errdefer list.deinit(gpa);
+        var it = std.mem.splitScalar(u8, text, '\n');
+        while (it.next()) |line| {
+            if (it.peek() == null and line.len == 0) break;
+            try list.append(gpa, try interner.intern(line));
+        }
+        side.* = try list.toOwnedSlice(gpa);
+        made += 1;
+    }
+    var lines_best: f64 = std.math.inf(f64);
+    var ids_best: f64 = std.math.inf(f64);
+    for (0..config.runs + 1) |run| {
+        const t0 = r.now();
+        const m = try d.merge(t.base, t.ours, t.theirs, .{ .algorithm = .histogram, .level = .zealous });
+        std.mem.doNotOptimizeAway(m.regions.len);
+        const t1 = r.now();
+        const s = try d.mergeSequences(ids[0], ids[1], ids[2], .{ .algorithm = .histogram, .level = .zealous, .classes = interner.classes() });
+        std.mem.doNotOptimizeAway(s.regions.len);
+        const t2 = r.now();
+        if (run != 0) {
+            lines_best = @min(lines_best, ns(t0, t1));
+            ids_best = @min(ids_best, ns(t1, t2));
+        }
+    }
+    try r.line("W7b", "lines", "merge", lines_best / 1e6, "ms");
+    try r.line("W7b", "interned ids", "merge", ids_best / 1e6, "ms");
+
+    // The merged text with every conflict marked, read back.
+    const m = try d.merge(t.base, t.ours, t.theirs, .{ .algorithm = .histogram, .level = .zealous, .style = .diff3 });
+    var marked: Io.Writer.Allocating = .init(gpa);
+    defer marked.deinit();
+    try parallax.merge.write(&marked.writer, m, .{});
+    var best: f64 = std.math.inf(f64);
+    var conflicts: usize = 0;
+    for (0..config.runs + 1) |run| {
+        conflicts = 0;
+        const t0 = r.now();
+        var it = parallax.merge.parseMarkers(marked.written(), .{});
+        while (try it.next()) |part| conflicts += @intFromBool(part == .conflict);
+        const t1 = r.now();
+        if (run != 0) best = @min(best, ns(t0, t1));
+    }
+    try r.line("W7b", "markers", "read back", best / 1e6, "ms");
+    try r.line("W7b", "markers", "throughput", @as(f64, @floatFromInt(marked.written().len)) / 1e6 / (best / 1e9), "MB/s");
+    try r.line("W7b", "markers", "conflicts", @floatFromInt(conflicts), "");
 }
 
 /// W9: patches parsed and applied, GNU patch's way.
@@ -437,5 +555,213 @@ fn patches(r: Report, gpa: Allocator, config: Config) !void {
         try r.line("W9", name, "per patch", best / @as(f64, @floatFromInt(cases.len)) / 1e3, "us");
         try r.line("W9", name, "throughput", @as(f64, @floatFromInt(bytes)) / 1e6 / (best / 1e9), "MB/s");
         try r.line("W9", name, "rejected", @floatFromInt(failed), "hunks");
+    }
+    // Applied to the side it already made, with the reversed hint: the
+    // first hunk is looked for both ways, at every fuzz.
+    for ([_]bool{ false, true }) |hinted| {
+        var best: f64 = std.math.inf(f64);
+        var reversed: usize = 0;
+        for (0..config.runs + 1) |run| {
+            var discard_buffer: [4096]u8 = undefined;
+            var discard: Io.Writer.Discarding = .init(&discard_buffer);
+            reversed = 0;
+            const t0 = r.now();
+            for (cases, pairs) |c, p| {
+                var parsed = try parallax.patch.parse(gpa, c.patch, .{});
+                defer parsed.deinit();
+                for (parsed.files) |file| {
+                    try results.resize(gpa, file.hunks.len);
+                    var hint = false;
+                    try parallax.patch.apply(gpa, &discard.writer, p.new, file, .{ .fuzz = 2, .rejects = .skip, .reversed_hint = if (hinted) &hint else null }, results.items);
+                    reversed += @intFromBool(hint);
+                }
+            }
+            const t1 = r.now();
+            if (run != 0) best = @min(best, ns(t0, t1));
+        }
+        const label = if (hinted) "applied, hint" else "applied";
+        try r.line("W9", label, "per patch", best / @as(f64, @floatFromInt(cases.len)) / 1e3, "us");
+        try r.line("W9", label, "reversed", @floatFromInt(reversed), "patches");
+    }
+}
+
+/// The corpus `zig build bench-corpus` wrote, read a record at a time.
+const Records = struct {
+    file: Io.File,
+    reader: Io.File.Reader,
+    buffer: [1 << 20]u8,
+
+    fn open(rec: *Records, io: Io, dir: []const u8, name: []const u8) !void {
+        var path_buffer: [4096]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buffer, "{s}/{s}", .{ dir, name });
+        rec.file = try Io.Dir.cwd().openFile(io, path, .{});
+        rec.reader = rec.file.readerStreaming(io, &rec.buffer);
+    }
+
+    fn close(rec: *Records, io: Io) void {
+        rec.file.close(io);
+    }
+
+    /// The next record into `fields`, or false at the end.
+    fn next(rec: *Records, gpa: Allocator, fields: []std.ArrayList(u8)) !bool {
+        for (fields, 0..) |*field, k| {
+            var len: [4]u8 = undefined;
+            rec.reader.interface.readSliceAll(&len) catch |err| switch (err) {
+                error.EndOfStream => return if (k == 0) false else error.TruncatedCorpus,
+                else => |e| return e,
+            };
+            try field.resize(gpa, std.mem.readInt(u32, &len, .little));
+            try rec.reader.interface.readSliceAll(field.items);
+        }
+        return true;
+    }
+};
+
+/// The corpus in `dir` is the one the committed manifest names.
+fn checkCorpus(gpa: Allocator, io: Io, dir: []const u8) !void {
+    var path_buffer: [4096]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "{s}/manifest", .{dir});
+    const manifest = try Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
+    defer gpa.free(manifest);
+    if (!std.mem.eql(u8, manifest, @embedFile("linux-v6.11-v6.12.manifest"))) return error.CorpusMismatch;
+}
+
+/// Files of this size or more are W4L's.
+const large_file = 1 << 20;
+
+/// W4 and W4L: every changed file of the real history, diffed by parallax
+/// (one workspace) and by the baseline, per-file latency from the best of
+/// the runs, and allocations per call once warm.
+fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !void {
+    try checkCorpus(gpa, io, dir);
+    var fields: [2]std.ArrayList(u8) = .{ .empty, .empty };
+    defer for (&fields) |*f| f.deinit(gpa);
+    var times: std.ArrayList(f64) = .empty;
+    defer times.deinit(gpa);
+    const records = try gpa.create(Records);
+    defer gpa.destroy(records);
+    for ([_]parallax.Algorithm{ .myers, .histogram }) |algorithm| {
+        var counting: Counting = .{ .inner = gpa };
+        var d: parallax.Differ = .init(counting.allocator());
+        defer d.deinit();
+        var best: [2]f64 = .{ std.math.inf(f64), std.math.inf(f64) };
+        var base_best: [2]f64 = .{ std.math.inf(f64), std.math.inf(f64) };
+        var bytes: [2]u64 = .{ 0, 0 };
+        var calls_warm: usize = 0;
+        var count: usize = 0;
+        for (0..config.runs + 1) |run| {
+            try records.open(io, dir, "pairs");
+            defer records.close(io);
+            var total: [2]f64 = .{ 0, 0 };
+            var base_total: [2]f64 = .{ 0, 0 };
+            const calls_before = counting.calls;
+            var at: usize = 0;
+            while (try records.next(gpa, &fields)) : (at += 1) {
+                const old = fields[0].items;
+                const new = fields[1].items;
+                const big = @max(old.len, new.len) >= large_file;
+                if (run == 0) {
+                    try times.append(gpa, std.math.inf(f64));
+                    bytes[0] += old.len + new.len;
+                    if (big) bytes[1] += old.len + new.len;
+                }
+                const t0 = r.now();
+                const diff = try d.lines(old, new, .{ .algorithm = algorithm });
+                std.mem.doNotOptimizeAway(diff.changes.len);
+                const t1 = r.now();
+                const old_lines = try textdiff.splitLines(gpa, old);
+                defer gpa.free(old_lines);
+                const new_lines = try textdiff.splitLines(gpa, new);
+                defer gpa.free(new_lines);
+                const changes = try textdiff.diffLines(gpa, old_lines, new_lines, .{ .algorithm = baselineAlgorithm(algorithm) });
+                gpa.free(changes);
+                const t2 = r.now();
+                times.items[at] = @min(times.items[at], ns(t0, t1));
+                total[0] += ns(t0, t1);
+                base_total[0] += ns(t1, t2);
+                if (big) {
+                    total[1] += ns(t0, t1);
+                    base_total[1] += ns(t1, t2);
+                }
+            }
+            count = at;
+            if (run == 0) continue;
+            if (run == 1) calls_warm = counting.calls - calls_before;
+            for (0..2) |k| {
+                best[k] = @min(best[k], total[k]);
+                base_best[k] = @min(base_best[k], base_total[k]);
+            }
+        }
+        var label_buf: [32]u8 = undefined;
+        const label = try std.fmt.bufPrint(&label_buf, "{t}", .{algorithm});
+        for ([_][]const u8{ "W4", "W4L" }, 0..) |name, k| {
+            try r.line(name, label, "parallax", best[k] / 1e6, "ms");
+            try r.line(name, label, "baseline", base_best[k] / 1e6, "ms");
+            try r.line(name, label, "A/B", base_best[k] / best[k], "x");
+            try r.line(name, label, "throughput", @as(f64, @floatFromInt(bytes[k])) / 1e6 / (best[k] / 1e9), "MB/s");
+        }
+        try r.line("W4", label, "files", @floatFromInt(count), "");
+        try r.line("W4", label, "allocations", @as(f64, @floatFromInt(calls_warm)) / @as(f64, @floatFromInt(@max(count, 1))), "per call");
+        std.mem.sort(f64, times.items, {}, std.sort.asc(f64));
+        try r.line("W4", label, "p50", percentile(times.items, 0.5) / 1e3, "us");
+        try r.line("W4", label, "p99", percentile(times.items, 0.99) / 1e3, "us");
+        try r.line("W4", label, "p999", percentile(times.items, 0.999) / 1e3, "us");
+        times.clearRetainingCapacity();
+    }
+}
+
+/// W7a: the merges of the real history's merge commits, as git's merge
+/// machinery takes them (histogram, zealous) and as `git merge-file` does
+/// (Myers, zealous-alnum), each written, against the baseline.
+fn realMerges(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !void {
+    try checkCorpus(gpa, io, dir);
+    var fields: [3]std.ArrayList(u8) = .{ .empty, .empty, .empty };
+    defer for (&fields) |*f| f.deinit(gpa);
+    const records = try gpa.create(Records);
+    defer gpa.destroy(records);
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const cases = [_]struct { []const u8, parallax.merge.Options, textdiff.Algorithm }{
+        .{ "histogram zealous", .{ .algorithm = .histogram, .level = .zealous }, .histogram },
+        .{ "myers zealous-alnum", .{}, .myers },
+    };
+    for (cases) |case| {
+        var best: f64 = std.math.inf(f64);
+        var base_best: f64 = std.math.inf(f64);
+        var conflicts: usize = 0;
+        var count: usize = 0;
+        for (0..config.runs + 1) |run| {
+            try records.open(io, dir, "merges");
+            defer records.close(io);
+            var total: f64 = 0;
+            var base_total: f64 = 0;
+            conflicts = 0;
+            count = 0;
+            var discard_buffer: [1 << 14]u8 = undefined;
+            var discard: Io.Writer.Discarding = .init(&discard_buffer);
+            while (try records.next(gpa, &fields)) : (count += 1) {
+                const t0 = r.now();
+                const m = try d.merge(fields[0].items, fields[1].items, fields[2].items, case[1]);
+                try parallax.merge.write(&discard.writer, m, .{});
+                const t1 = r.now();
+                var result = try blobmerge.blobs(gpa, fields[0].items, fields[1].items, fields[2].items, .{
+                    .algorithm = case[2],
+                    .join_without_alnum = case[1].level == .zealous_alnum,
+                });
+                result.deinit();
+                const t2 = r.now();
+                total += ns(t0, t1);
+                base_total += ns(t1, t2);
+                conflicts += m.conflicts;
+            }
+            if (run == 0) continue;
+            best = @min(best, total);
+            base_best = @min(base_best, base_total);
+        }
+        try r.line("W7a", case[0], "parallax", best / 1e6, "ms");
+        try r.line("W7a", case[0], "baseline", base_best / 1e6, "ms");
+        try r.line("W7a", case[0], "A/B", base_best / best, "x");
+        try r.line("W7a", case[0], "merges", @floatFromInt(count), "files");
+        try r.line("W7a", case[0], "conflicts", @floatFromInt(conflicts), "");
     }
 }

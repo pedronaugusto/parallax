@@ -51,6 +51,13 @@ pub const Options = struct {
     style: Style = .merge,
     /// git merge-file's; git's merge machinery passes `.zealous`.
     level: Level = .zealous_alnum,
+    /// A flag the caller may raise, from another thread, to abandon the
+    /// call. It is read once per work unit and once per histogram or
+    /// patience region; from the first time it reads true, what is left is
+    /// described as one deletion and one insertion, as when `max_work` runs
+    /// out, so the call returns soon with a result that is correct but
+    /// coarse. The caller that raised it knows to discard that result.
+    stop: ?*const std.atomic.Value(bool) = null,
 };
 
 pub const Range = struct { start: u32, len: u32 };
@@ -106,33 +113,74 @@ pub const Buffers = struct {
     refine: std.ArrayList(Change) = .empty,
 };
 
+/// How a merge of id sequences is taken: `Differ.mergeSequences`.
+pub const SequenceOptions = struct {
+    algorithm: Algorithm = .myers,
+    /// Prove the Myers scripts minimal.
+    minimal: bool = false,
+    /// Every id is below this.
+    classes: u32,
+    /// Changes the regions as for lines: narrowed or not, and (zdiff3) the
+    /// ends both sides agree on moved out of each conflict.
+    style: Style = .merge,
+    level: Level = .zealous_alnum,
+    /// Whether our token at an index holds content: `.zealous_alnum` joins
+    /// two conflicts with only tokens without content between them, as it
+    /// joins lines with no letter or digit. Null: every token has content,
+    /// and `.zealous_alnum` is `.zealous`.
+    content: ?core.Predicate = null,
+    /// As `Options.stop`.
+    stop: ?*const std.atomic.Value(bool) = null,
+};
+
+/// A merge of id sequences: regions over the three sequences, as `Merge`
+/// has them over lines.
+pub const SequenceMerge = struct {
+    /// In the order of our side, covering it.
+    regions: []const Region,
+    conflicts: u32,
+};
+
+/// What a merge reads beyond the ids.
+pub const Source = union(enum) {
+    /// Lines: the texts settle the comparison's one quirk when two ids
+    /// differ, and say which lines hold a letter or digit.
+    lines: struct { ours: Lines, theirs: Lines, compare: Compare },
+    /// Sequences: ids alone, and the caller's test of content.
+    sequence: ?core.Predicate,
+};
+
 /// Everything one merge reads.
 pub const Input = struct {
     gpa: Allocator,
     core: *core.Buffers,
     buffers: *Buffers,
-    base: Lines,
-    ours: Lines,
-    theirs: Lines,
+    /// Lines or tokens in base, ours and theirs.
+    lens: [3]u32,
     ids_ours: []const u32,
     ids_theirs: []const u32,
     classes: u32,
-    max_work: u64 = 0,
-    options: Options,
+    source: Source,
+    algorithm: Algorithm,
+    minimal: bool,
+    style: Style,
+    level: Level,
+    stop: ?*const std.atomic.Value(bool),
 };
 
 /// The merge whose scripts against the base are `xs1` (ours) and `xs2`
-/// (theirs). Neither is empty.
-pub fn solve(in: Input, xs1: []const Change, xs2: []const Change) Allocator.Error!Merge {
+/// (theirs), neither empty, as regions in `in.buffers.regions`. Returns the
+/// number of conflicts.
+pub fn solve(in: Input, xs1: []const Change, xs2: []const Change) Allocator.Error!u32 {
     const b = in.buffers;
     b.hunks.clearRetainingCapacity();
     b.same.clearRetainingCapacity();
     b.regions.clearRetainingCapacity();
-    var level = in.options.level;
-    if (in.options.style == .diff3 and @backingInt(level) > @backingInt(Level.eager)) level = .eager;
+    var level = in.level;
+    if (in.style == .diff3 and @backingInt(level) > @backingInt(Level.eager)) level = .eager;
 
     try walk(in, level, xs1, xs2);
-    switch (in.options.style) {
+    switch (in.style) {
         .zdiff3 => trim(in),
         .merge, .diff3 => if (@backingInt(level) >= @backingInt(Level.zealous)) {
             try refine(in);
@@ -167,16 +215,19 @@ fn sameLines(in: Input, at1: i64, at2: i64, n: i64) bool {
         const i: u32 = @intCast(at1 + k);
         const j: u32 = @intCast(at2 + k);
         if (in.ids_ours[i] == in.ids_theirs[j]) continue;
-        if (!compare_mod.sameLine(in.ours.get(i), in.theirs.get(j), in.options.compare)) return false;
+        switch (in.source) {
+            .lines => |l| if (!compare_mod.sameLine(l.ours.get(i), l.theirs.get(j), l.compare)) return false,
+            .sequence => return false,
+        }
     }
     return true;
 }
 
 /// Walk the two scripts together, as `xdl_do_merge` does.
 fn walk(in: Input, level: Level, xs1: []const Change, xs2: []const Change) Allocator.Error!void {
-    const base_len: i64 = in.base.len();
-    const our_len: i64 = in.ours.len();
-    const their_len: i64 = in.theirs.len();
+    const base_len: i64 = in.lens[0];
+    const our_len: i64 = in.lens[1];
+    const their_len: i64 = in.lens[2];
     var x1_at: usize = 0;
     var x2_at: usize = 0;
     while (x1_at < xs1.len and x2_at < xs2.len) {
@@ -255,11 +306,12 @@ fn refine(in: Input) Allocator.Error!void {
         const s1: usize = @intCast(m.at1);
         const s2: usize = @intCast(m.at2);
         _ = try core.diff(core.Plain, in.gpa, .{}, in.core, in.ids_ours[s1..][0..@intCast(m.len1)], in.ids_theirs[s2..][0..@intCast(m.len2)], .{
-            .algorithm = in.options.algorithm,
-            .minimal = in.options.minimal,
-            .max_work = in.max_work,
+            .algorithm = in.algorithm,
+            .minimal = in.minimal,
+            .max_work = 0,
             .classes = in.classes,
             .indent_heuristic = false,
+            .stop = in.stop,
         }, out);
         if (out.items.len == 0) {
             hunks.items[at].mode = .identical;
@@ -296,7 +348,7 @@ fn join(in: Input, without_alnum: bool) void {
         const m = &hunks.items[at];
         const next = hunks.items[at + 1];
         const begin = m.at1 + m.len1;
-        const far = next.at1 - begin > 3 and (!without_alnum or anyAlnum(in.ours, begin, next.at1 - begin));
+        const far = next.at1 - begin > 3 and (!without_alnum or anyContent(in.source, begin, next.at1 - begin));
         if (m.mode != .conflict or next.mode != .conflict or far) {
             at += 1;
             continue;
@@ -308,12 +360,19 @@ fn join(in: Input, without_alnum: bool) void {
     }
 }
 
-/// `lines_contain_alnum`: whether any of the lines holds an ASCII letter or
-/// digit.
-fn anyAlnum(lines: Lines, at: i64, n: i64) bool {
+/// `lines_contain_alnum`: whether any of our lines holds an ASCII letter or
+/// digit; for a sequence, whether any of our tokens holds content.
+fn anyContent(source: Source, at: i64, n: i64) bool {
     var k: i64 = 0;
     while (k < n) : (k += 1) {
-        for (lines.get(@intCast(at + k))) |c| if (std.ascii.isAlphanumeric(c)) return true;
+        const i: u32 = @intCast(at + k);
+        switch (source) {
+            .lines => |l| for (l.ours.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true,
+            .sequence => |content| {
+                const p = content orelse return true;
+                if (p.at(p.context, i)) return true;
+            },
+        }
     }
     return false;
 }
@@ -343,7 +402,7 @@ fn range(at: i64, len: i64) Range {
 
 /// The hunks, with the stretches between them as unchanged regions or, where
 /// both sides made the same change, same regions.
-fn regions(in: Input) Allocator.Error!Merge {
+fn regions(in: Input) Allocator.Error!u32 {
     const b = in.buffers;
     var cursor: Cursor = .{ .in = in };
     var conflicts: u32 = 0;
@@ -361,15 +420,8 @@ fn regions(in: Input) Allocator.Error!Merge {
         cursor.b = @max(cursor.b, h.at0 + h.len0);
         cursor.t = @max(cursor.t, h.at2 + h.len2);
     }
-    try cursor.gap(in.ours.len(), in.base.len(), in.theirs.len());
-    return .{
-        .base = in.base,
-        .ours = in.ours,
-        .theirs = in.theirs,
-        .regions = b.regions.items,
-        .conflicts = conflicts,
-        .style = in.options.style,
-    };
+    try cursor.gap(in.lens[1], in.lens[0], in.lens[2]);
+    return conflicts;
 }
 
 const Cursor = struct {

@@ -20,5 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Differ.refine`: the spans inside one change that differ, by `Tokens` (`words`, `chars`, `bytes`), under a `Compare`.
 - `patch.parse`: unified patches with any number of files, header lines kept verbatim, and `Diagnostics` for a malformed hunk.
 - `patch.apply`: one file's hunks applied with GNU patch's offset, fuzz, reverse and reject rules, and a result per hunk.
+- `stop` on `Options`, `SequenceOptions`, `merge.Options`, `merge.SequenceOptions` and `RefineOptions`: a flag the caller raises, from any thread, to have a diff, merge or refinement finish early with a coarse result that is still correct.
+- `HunkOptions.function_context`: hunks widened to the whole function around their changes, as `git diff -W` widens them, by a `Heading`'s rule for where a function starts.
+- `RefineOptions.cleanup` (`Cleanup.semantic`, `Cleanup.efficiency`) and `RefineOptions.edit_cost`: diff-match-patch's cleanups over the token script before it becomes spans.
+- `merge.parseMarkers`: the text and conflicts of marked text, read back as git's rerere reads them, with each side, the base when there is one, and the labels.
+- `Differ.mergeSequences`, with `merge.SequenceOptions` and `merge.SequenceMerge`: the three-way merge of any interned sequences, as regions, in every style and level.
+- `ApplyOptions.reversed_hint`: whether a patch looks reversed or already applied, where GNU patch would say so.
+- `zig build bench-corpus`, which collects the changed files of a range of a git history (Linux v6.11..v6.12 by default) for the benchmarks on real files, and `bench/cli`, a small command that diffs, merges and applies.
 
 [Unreleased]: https://github.com/pedronaugusto/parallax/commits/main

@@ -1,0 +1,12 @@
+parallax bench corpus 1
+range: v6.11..v6.12
+from: 98f7e32f20d28ec452afb208f9cffc08448a2652
+to: adc218676eef25575469234709c2d87185ca223a
+commits: 13344
+pairs: 25529
+pairs bytes: 2661638213
+pairs sha256: 289a4ece32401afcda91ebf9d1720dc3a857ba4ced7e0bc979b02839299deb49
+merges: 1249
+triples: 45444
+triples bytes: 4244447848
+triples sha256: 88e6eea12adf49b4be7f66f8b7680504017bed9db10b06c2d36e21b76eaefe64

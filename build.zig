@@ -13,11 +13,21 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    // git's output, captured once, as data.
-    for ([_][]const u8{ "diff", "unified", "merge" }) |name| {
-        tests.root_module.addAnonymousImport(b.fmt("{s}.corpus", .{name}), .{ .root_source_file = b.path(b.fmt("testdata/git-2.55/{s}.corpus", .{name})) });
+    // The references' output, captured once, as data: git's, GNU patch's
+    // and diff-match-patch's.
+    for ([_][]const u8{
+        "git-2.55/diff",
+        "git-2.55/unified",
+        "git-2.55/merge",
+        "git-2.55/function",
+        "git-2.55/markers",
+        "gnu-patch-2.8/patch",
+        "gnu-patch-2.8/reversed",
+        "diff-match-patch-20241021/cleanup",
+    }) |path| {
+        const name = path[std.mem.findScalar(u8, path, '/').? + 1 ..];
+        tests.root_module.addAnonymousImport(b.fmt("{s}.corpus", .{name}), .{ .root_source_file = b.path(b.fmt("testdata/{s}.corpus", .{path})) });
     }
-    tests.root_module.addAnonymousImport("patch.corpus", .{ .root_source_file = b.path("testdata/gnu-patch-2.8/patch.corpus") });
     tests.root_module.addAnonymousImport("gen", .{ .root_source_file = b.path("bench/gen.zig") });
     const test_step = b.step("test", "Run the tests and example");
     test_step.dependOn(&b.addRunArtifact(tests).step);
@@ -54,6 +64,32 @@ pub fn build(b: *std.Build) void {
             bench_step.dependOn(&run.step);
         } else check.dependOn(&bench.step);
     }
+    // A small command over the library, to time against other tools end
+    // to end; `check` compiles it with the benchmarks.
+    const cli = b.addExecutable(.{
+        .name = "parallax-cli",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/cli.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "parallax", .module = module }},
+        }),
+    });
+    check.dependOn(&cli.step);
+    b.step("cli", "Build bench/cli into zig-out/bin (-Doptimize=ReleaseFast to time it)").dependOn(&b.addInstallArtifact(cli, .{}).step);
+    // The real-history corpus, made by git from a repository the caller
+    // names, written outside this repository.
+    const corpus = b.addExecutable(.{
+        .name = "bench-corpus",
+        .root_module = b.createModule(.{ .root_source_file = b.path("bench/corpus.zig"), .target = target, .optimize = .safe }),
+    });
+    check.dependOn(&corpus.step);
+    const corpus_run = b.addRunArtifact(corpus);
+    corpus_run.addArg("--manifest");
+    corpus_run.addFileArg(b.path("bench/linux-v6.11-v6.12.manifest"));
+    corpus_run.addPassthruArgs();
+    corpus_run.has_side_effects = true;
+    b.step("bench-corpus", "Collect the real-history corpus: -- --repo <git repository> --out <directory>").dependOn(&corpus_run.step);
     // No Io and no OS calls: the library builds for a target with no OS.
     const freestanding = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const object = b.addObject(.{

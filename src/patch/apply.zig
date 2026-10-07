@@ -33,6 +33,8 @@ const State = struct {
     /// Whether the output so far ends with a newline.
     after_newline: bool = true,
     pattern: std.ArrayList(Pattern) = .empty,
+    /// The first hunk's lines the other way round, for the reversed probe.
+    pattern_back: std.ArrayList(Pattern) = .empty,
 
     fn inputLines(s: *const State) i64 {
         return s.base.len();
@@ -41,8 +43,7 @@ const State = struct {
     /// Whether the pattern matches the base with its line `pline` (1-based)
     /// at base line `pline - 1 + at`, for the lines `prefix_fuzz` and
     /// `suffix_fuzz` leave.
-    fn matches(s: *const State, at: i64, prefix_fuzz: i64, suffix_fuzz: i64) bool {
-        const pat = s.pattern.items;
+    fn matches(s: *const State, pat: []const Pattern, at: i64, prefix_fuzz: i64, suffix_fuzz: i64) bool {
         var pline: i64 = 1 + prefix_fuzz;
         const last: i64 = @as(i64, @intCast(pat.len)) - suffix_fuzz;
         while (pline <= last) : (pline += 1) {
@@ -58,9 +59,12 @@ const State = struct {
 
     /// GNU patch's `locate_hunk`: the 1-based base line the pattern's first
     /// line goes on, or 0.
-    fn locate(s: *State, first: i64, prefix_context: i64, suffix_context: i64, fuzz: i64) i64 {
+    fn locate(s: *State, pat: []const Pattern, shape: Shape, fuzz: i64) i64 {
+        const first = shape.first;
+        const prefix_context = shape.prefix_context;
+        const suffix_context = shape.suffix_context;
         const first_guess = first + s.offset;
-        const pat_lines: i64 = @intCast(s.pattern.items.len);
+        const pat_lines: i64 = @intCast(pat.len);
         const context = @max(prefix_context, suffix_context);
         var prefix_fuzz = fuzz + prefix_context - context;
         const suffix_fuzz = fuzz + suffix_context - context;
@@ -78,7 +82,7 @@ const State = struct {
         if (prefix_fuzz < 0 and first <= 1) {
             // Less context before than after: only the start of the file.
             const shift = 1 - first_guess;
-            if (s.frozen <= prefix_context and shift <= max_pos_offset and s.allowed(shift) and s.matches(first_guess + shift, 0, suffix_fuzz)) {
+            if (s.frozen <= prefix_context and shift <= max_pos_offset and s.allowed(shift) and s.matches(pat, first_guess + shift, 0, suffix_fuzz)) {
                 s.offset += shift;
                 return first_guess + shift;
             }
@@ -88,7 +92,7 @@ const State = struct {
         if (suffix_fuzz < 0) {
             // Less context after than before: only the end of the file.
             const shift = first_guess - (s.inputLines() - pat_lines + 1);
-            if (shift <= max_neg_offset and s.allowed(shift) and s.matches(first_guess - shift, prefix_fuzz, 0)) {
+            if (shift <= max_neg_offset and s.allowed(shift) and s.matches(pat, first_guess - shift, prefix_fuzz, 0)) {
                 s.offset -= shift;
                 return first_guess - shift;
             }
@@ -98,11 +102,11 @@ const State = struct {
         const min_offset: i64 = if (max_pos_offset < 0) first_guess - max_where else if (max_neg_offset < 0) first_guess - min_where else 0;
         var shift = min_offset;
         while (shift <= max_offset) : (shift += 1) {
-            if (shift <= max_pos_offset and s.matches(first_guess + shift, prefix_fuzz, suffix_fuzz)) {
+            if (shift <= max_pos_offset and s.matches(pat, first_guess + shift, prefix_fuzz, suffix_fuzz)) {
                 s.offset += shift;
                 return first_guess + shift;
             }
-            if (shift <= max_neg_offset and s.matches(first_guess - shift, prefix_fuzz, suffix_fuzz)) {
+            if (shift <= max_neg_offset and s.matches(pat, first_guess - shift, prefix_fuzz, suffix_fuzz)) {
                 s.offset -= shift;
                 return first_guess - shift;
             }
@@ -140,14 +144,17 @@ fn adds(kind: Line.Kind, reverse: bool) bool {
     return kind == if (reverse) Line.Kind.removed else Line.Kind.added;
 }
 
-/// Apply one hunk, or say it does not apply.
-fn hunk(s: *State, h: Hunk, nonexistent: bool) Allocator.Error!?types.HunkResult {
-    const reverse = s.options.reverse;
-    s.pattern.clearRetainingCapacity();
+/// Where a hunk says it goes, and how much context it has at each end.
+const Shape = struct { first: i64, prefix_context: i64, suffix_context: i64 };
+
+/// The lines a hunk looks for when applied forwards or `reverse`, into
+/// `pattern`, and where it says they are.
+fn prepare(s: *State, pattern: *std.ArrayList(Pattern), h: Hunk, reverse: bool) Allocator.Error!Shape {
+    pattern.clearRetainingCapacity();
     var prefix_context: i64 = -1;
     var context: i64 = 0;
     for (h.lines) |line| {
-        if (!adds(line.kind, reverse)) try s.pattern.append(s.gpa, .{ .text = line.text, .hash = compare.hash(line.text, s.options.compare) });
+        if (!adds(line.kind, reverse)) try pattern.append(s.gpa, .{ .text = line.text, .hash = compare.hash(line.text, s.options.compare) });
         if (line.kind == .context) {
             context += 1;
         } else {
@@ -157,17 +164,35 @@ fn hunk(s: *State, h: Hunk, nonexistent: bool) Allocator.Error!?types.HunkResult
     }
     // A hunk of context only, as GNU patch takes it: no change at all.
     if (prefix_context < 0) prefix_context = context;
-    const suffix_context = context;
     const stated_start: i64 = if (reverse) h.new_start else h.old_start;
-    const stated_len = s.pattern.items.len;
-    const first: i64 = if (stated_len == 0) stated_start + 1 else stated_start;
-    const max_fuzz = @min(@as(i64, s.options.fuzz), @max(prefix_context, suffix_context));
+    return .{
+        .first = if (pattern.items.len == 0) stated_start + 1 else stated_start,
+        .prefix_context = prefix_context,
+        .suffix_context = context,
+    };
+}
+
+/// Apply one hunk, or say it does not apply. With `hint`, a hunk that does
+/// not apply at some fuzz is looked for at that fuzz the other way round
+/// too, as GNU patch does for a file's first hunk, and finding it there
+/// sets `hint`. The probe moves nothing: the hunk goes on as given.
+fn hunk(s: *State, h: Hunk, nonexistent: bool, hint: ?*bool) Allocator.Error!?types.HunkResult {
+    const reverse = s.options.reverse;
+    const shape = try prepare(s, &s.pattern, h, reverse);
+    // The other way round, read only when there is a hint to give.
+    const back: Shape = if (hint != null) try prepare(s, &s.pattern_back, h, !reverse) else undefined;
+    const max_fuzz = @min(@as(i64, s.options.fuzz), @max(shape.prefix_context, shape.suffix_context));
 
     var fuzz: i64 = 0;
     var where: i64 = 0;
     while (fuzz <= max_fuzz) : (fuzz += 1) {
-        where = s.locate(first, prefix_context, suffix_context, fuzz);
+        where = s.locate(s.pattern.items, shape, fuzz);
         if (where != 0) break;
+        const flag = hint orelse continue;
+        if (flag.*) continue;
+        const offset = s.offset;
+        flag.* = s.locate(s.pattern_back.items, back, fuzz) != 0;
+        s.offset = offset;
     }
     if (where == 0) return null;
     if (where == 1 and nonexistent and s.base.text.len != 0) return null;
@@ -214,11 +239,13 @@ pub fn apply(
     for (hashes, 0..) |*h, i| h.* = compare.hash(lines.get(@intCast(i)), options.compare);
     var s: State = .{ .gpa = gpa, .w = w, .base = lines, .hashes = hashes, .options = options };
     defer s.pattern.deinit(gpa);
+    defer s.pattern_back.deinit(gpa);
+    if (options.reversed_hint) |hint| hint.* = false;
 
     const old_name = if (options.reverse) file.new_name else file.old_name;
     const nonexistent = if (old_name) |n| std.mem.eql(u8, n, "/dev/null") else false;
     for (file.hunks, 0..) |h, i| {
-        const result = try hunk(&s, h, nonexistent) orelse {
+        const result = try hunk(&s, h, nonexistent, if (i == 0) options.reversed_hint else null) orelse {
             if (results) |r| r[i] = .rejected;
             if (options.rejects == .fail) return error.HunkFailed;
             continue;

@@ -154,19 +154,27 @@ pub fn diffOne(s: Source) !void {
     var b_buf: [320]u8 = undefined;
     const old = text(s, &a_buf);
     const new = if (s.oneIn(3)) text(s, &b_buf) else edit(s, old, &b_buf);
-    const o = options(s);
+    var o = options(s);
+    // A stop flag raised before the call: the script is coarse, and still
+    // applies.
+    const raised: std.atomic.Value(bool) = .init(true);
+    if (s.oneIn(6)) o.stop = &raised;
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     const diff = try d.lines(old, new, o);
     try expectApplies(diff);
-    var it = diff.hunks(.{ .context = @intCast(s.index(4)), .inter_hunk_context = @intCast(s.index(3)) });
-    var covered: usize = 0;
-    while (it.next()) |h| {
-        try std.testing.expect(h.old_start + h.old_len <= diff.old.len());
-        try std.testing.expect(h.new_start + h.new_len <= diff.new.len());
-        covered += h.changes.len;
-    }
-    try std.testing.expectEqual(diff.changes.len, covered);
+    const hunk_options: parallax.HunkOptions = .{
+        .context = @intCast(s.index(4)),
+        .inter_hunk_context = @intCast(s.index(3)),
+        .ignore_blank_lines = s.oneIn(4),
+    };
+    try expectHunks(diff, hunk_options);
+    // Whole functions: the same, except that a hunk may overlap the one
+    // before, as git's do.
+    var whole = hunk_options;
+    whole.function_context = .c_function;
+    try expectHunks(diff, whole);
+    if (o.stop != null) return;
     if (o.max_work == 0 and !o.minimal) {
         const plain = diff.stat();
         var exact = o;
@@ -176,6 +184,35 @@ pub fn diffOne(s: Source) !void {
         const st = m.stat();
         try std.testing.expect(st.added + st.removed <= plain.added + plain.removed or o.algorithm != .myers);
     }
+}
+
+/// The hunks of `diff` are in bounds, ascend, hold their changes, and cover
+/// every change at most once (with no ignorable change, exactly once);
+/// without whole functions they never overlap.
+fn expectHunks(diff: parallax.Diff, hunk_options: parallax.HunkOptions) !void {
+    var it = diff.hunks(hunk_options);
+    var covered: usize = 0;
+    var old_end: u32 = 0;
+    var new_end: u32 = 0;
+    var next_change: usize = 0;
+    while (it.next()) |h| {
+        try std.testing.expect(h.old_start + h.old_len <= diff.old.len());
+        try std.testing.expect(h.new_start + h.new_len <= diff.new.len());
+        // Whole functions may overlap the hunk before, as git's do.
+        if (hunk_options.function_context == null) try std.testing.expect(h.old_start >= old_end and h.new_start >= new_end);
+        try std.testing.expect(h.changes.len != 0);
+        var first = next_change;
+        while (diff.changes[first].old_start != h.changes[0].old_start) first += 1;
+        next_change = first + h.changes.len;
+        for (h.changes) |c| {
+            try std.testing.expect(c.old_start >= h.old_start and c.old_start + c.old_len <= h.old_start + h.old_len);
+            try std.testing.expect(c.new_start >= h.new_start and c.new_start + c.new_len <= h.new_start + h.new_len);
+        }
+        old_end = h.old_start + h.old_len;
+        new_end = h.new_start + h.new_len;
+        covered += h.changes.len;
+    }
+    if (!hunk_options.ignore_blank_lines) try std.testing.expectEqual(diff.changes.len, covered);
 }
 
 /// Two random lines under every comparison: one form means a match, and
@@ -267,39 +304,42 @@ pub fn mergeOne(s: Source) !void {
     try std.testing.expect(std.mem.find(u8, as_ours.written(), "<<<<<<<") == null);
 
     // Read the markers back: outside text and our part is the ours
-    // resolution, outside text and their part the theirs one.
+    // resolution, outside text and their part the theirs one, and each
+    // conflict's parts are its regions' lines.
     var read_ours: std.ArrayList(u8) = .empty;
     defer read_ours.deinit(gpa);
     var read_theirs: std.ArrayList(u8) = .empty;
     defer read_theirs.deinit(gpa);
-    var state: enum { out, ours, base, theirs } = .out;
     var conflicts: u32 = 0;
-    var lines = std.mem.splitScalar(u8, markers.written(), '\n');
-    while (lines.next()) |line| {
-        if (lines.peek() == null and line.len == 0) break;
-        if (std.mem.startsWith(u8, line, "<<<<<<< ")) {
-            state = .ours;
+    var marked = parallax.merge.parseMarkers(markers.written(), .{});
+    var region_at: usize = 0;
+    while (try marked.next()) |part| switch (part) {
+        .text => |t| {
+            try read_ours.appendSlice(gpa, t);
+            try read_theirs.appendSlice(gpa, t);
+        },
+        .conflict => |c| {
             conflicts += 1;
-            continue;
-        }
-        if (std.mem.startsWith(u8, line, "||||||| ")) {
-            state = .base;
-            continue;
-        }
-        if (std.mem.eql(u8, line, "=======") or std.mem.eql(u8, line, "=======\r")) {
-            state = .theirs;
-            continue;
-        }
-        if (std.mem.startsWith(u8, line, ">>>>>>> ")) {
-            state = .out;
-            continue;
-        }
-        if (state == .out or state == .ours) try read_ours.print(gpa, "{s}\n", .{line});
-        if (state == .out or state == .theirs) try read_theirs.print(gpa, "{s}\n", .{line});
-    }
+            while (m.regions[region_at].kind != .conflict) region_at += 1;
+            const r = m.regions[region_at];
+            region_at += 1;
+            try expectSide(c.ours, m.ours.span(r.ours.start, r.ours.len));
+            try expectSide(c.theirs, m.theirs.span(r.theirs.start, r.theirs.len));
+            if (m.style == .merge) {
+                try std.testing.expect(c.base == null);
+            } else try expectSide(c.base.?, m.base.span(r.base.start, r.base.len));
+            try std.testing.expectEqualStrings("ours", c.labels.ours);
+            try std.testing.expectEqualStrings("theirs", c.labels.theirs);
+            try read_ours.appendSlice(gpa, c.ours);
+            try read_theirs.appendSlice(gpa, c.theirs);
+        },
+    };
     try std.testing.expectEqual(m.conflicts, conflicts);
     try std.testing.expectEqualStrings(as_ours.written(), read_ours.items);
     try std.testing.expectEqualStrings(as_theirs.written(), read_theirs.items);
+
+    // The same merge over interned lines gives the same regions.
+    if (o.compare.exact()) try expectSequenceMerge(&d, m, o);
 
     // A side with no change gives the other side.
     const kept = try d.merge(base, ours, base, o);
@@ -312,6 +352,49 @@ pub fn mergeOne(s: Source) !void {
     out.clearRetainingCapacity();
     try parallax.merge.write(&out.writer, taken, .{});
     try std.testing.expectEqualStrings(theirs, out.written());
+}
+
+/// A side read back from markers is its region's lines, a newline added
+/// to a last line without one.
+fn expectSide(read: []const u8, lines: []const u8) !void {
+    if (lines.len != 0 and lines[lines.len - 1] != '\n') {
+        try std.testing.expectEqualStrings(lines, read[0..lines.len]);
+        try std.testing.expect(std.mem.eql(u8, read[lines.len..], "\n") or std.mem.eql(u8, read[lines.len..], "\r\n"));
+    } else try std.testing.expectEqualStrings(lines, read);
+}
+
+fn hasContent(context: ?*const anyopaque, i: u32) bool {
+    const lines: *const parallax.Lines = @ptrCast(@alignCast(context.?)); // safe: the caller passes its Lines
+    for (lines.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true;
+    return false;
+}
+
+/// `m`, merged again over interned lines, gives the same regions.
+fn expectSequenceMerge(d: *parallax.Differ, m: parallax.merge.Merge, o: parallax.merge.Options) !void {
+    const gpa = std.testing.allocator;
+    var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
+    defer interner.deinit();
+    var ids: [3][]u32 = undefined;
+    var made: usize = 0;
+    defer for (ids[0..made]) |side| gpa.free(side);
+    for (&ids, [_]parallax.Lines{ m.base, m.ours, m.theirs }) |*side, lines| {
+        side.* = try gpa.alloc(u32, lines.len());
+        made += 1;
+        for (side.*, 0..) |*id, i| id.* = try interner.intern(lines.get(@intCast(i)));
+    }
+    const regions = try gpa.dupe(parallax.merge.Region, m.regions);
+    defer gpa.free(regions);
+    const ours = m.ours;
+    const sequence = try d.mergeSequences(ids[0], ids[1], ids[2], .{
+        .algorithm = o.algorithm,
+        .minimal = o.minimal,
+        .classes = interner.classes(),
+        .style = o.style,
+        .level = o.level,
+        .content = .{ .context = @ptrCast(&ours), .at = hasContent }, // safe: hasContent reads it back as Lines
+    });
+    try std.testing.expectEqual(m.conflicts, sequence.conflicts);
+    try std.testing.expectEqualSlices(parallax.merge.Region, regions, sequence.regions);
 }
 
 /// `text` written `times` times, at compile time.
@@ -346,6 +429,8 @@ pub fn refineOne(s: Source) !void {
             .tokens = tokens,
             .algorithm = algorithms[s.index(3)],
             .compare = if (ignore) .{ .ignore_case = true } else .{},
+            .cleanup = @fromBackingInt(@intCast(s.index(3))),
+            .edit_cost = @intCast(1 + s.index(6)),
         });
         try expectTiles(diff.old, c.old_start, c.old_len, r.old, c.new_len == 0);
         try expectTiles(diff.new, c.new_start, c.new_len, r.new, c.old_len == 0);
@@ -471,8 +556,11 @@ pub fn patchOne(s: Source) !void {
     for ([_]bool{ false, true }) |reverse| {
         var out: std.Io.Writer.Allocating = .init(gpa);
         defer out.deinit();
-        try parallax.patch.apply(gpa, &out.writer, if (reverse) new else old, file, .{ .reverse = reverse }, null);
+        // A patch that applies as given is never taken for a reversed one.
+        var hint = true;
+        try parallax.patch.apply(gpa, &out.writer, if (reverse) new else old, file, .{ .reverse = reverse, .reversed_hint = &hint }, null);
         try std.testing.expectEqualStrings(if (reverse) old else new, out.written());
+        try std.testing.expect(!hint);
     }
 }
 
@@ -511,4 +599,46 @@ pub fn parseOne(s: Source) !void {
         try std.testing.expectEqual(h.old_len, old_lines);
         try std.testing.expectEqual(h.new_len, new_lines);
     };
+}
+
+/// Marker-shaped bytes: the parts tile the text, a conflict's pieces lie
+/// inside it in order, and only the iterator's own errors come back.
+pub fn markersOne(s: Source) !void {
+    const pieces = [_][]const u8{
+        "<<<<<<< a\n", "<<<<<<<\n", "|||||||\n", "||||||| b\n", "=======\n", "=======\r\n",  ">>>>>>> c\n",
+        ">>>>>>>\n",   "<<<\n",     "x\n",       "y",           "\n",        "<<<<<<<< z\n", "=",
+    };
+    var buf: [512]u8 = undefined;
+    var len: usize = 0;
+    while (!s.oneIn(30)) {
+        const p = pieces[s.index(pieces.len)];
+        if (len + p.len > buf.len) break;
+        @memcpy(buf[len..][0..p.len], p);
+        len += p.len;
+    }
+    const marked = buf[0..len];
+    var it = parallax.merge.parseMarkers(marked, .{ .marker_size = if (s.oneIn(4)) 3 else 7 });
+    var at: usize = 0;
+    while (true) {
+        const part = it.next() catch |err| switch (err) {
+            error.UnterminatedConflict, error.MisplacedMarker, error.TooDeep => {
+                try std.testing.expect(it.line != 0);
+                return;
+            },
+        } orelse break;
+        const bytes = switch (part) {
+            .text => |t| t,
+            .conflict => |c| blk: {
+                for ([_]?[]const u8{ c.ours, c.base, c.theirs }) |piece| {
+                    const p = piece orelse continue;
+                    try std.testing.expect(std.mem.find(u8, c.whole, p) != null);
+                }
+                break :blk c.whole;
+            },
+        };
+        try std.testing.expectEqualStrings(marked[at..][0..bytes.len], bytes);
+        try std.testing.expect(bytes.len != 0);
+        at += bytes.len;
+    }
+    try std.testing.expectEqual(marked.len, at);
 }

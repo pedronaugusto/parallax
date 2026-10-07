@@ -1,7 +1,9 @@
 //! Hunks: changes grouped with their context, as git's `xdl_get_hunk` and
 //! `xdl_emit_diff` group them, with ignorable changes (`--ignore-blank-lines`,
-//! `-I`) and inter-hunk context. An iterator; nothing is allocated.
+//! `-I`), inter-hunk context and whole functions (`-W`). An iterator;
+//! nothing is allocated.
 
+const std = @import("std");
 const Change = @import("change.zig").Change;
 const Lines = @import("lines.zig").Lines;
 const compare = @import("compare.zig");
@@ -10,6 +12,34 @@ const compare = @import("compare.zig");
 pub const LinePredicate = struct {
     context: ?*const anyopaque = null,
     at: *const fn (context: ?*const anyopaque, line: []const u8) bool,
+};
+
+/// Which lines start a function, and what a hunk shows of one: the text
+/// after a hunk's second `@@`, and the bounds `HunkOptions.function_context`
+/// widens a hunk to.
+pub const Heading = struct {
+    context: ?*const anyopaque = null,
+    /// Given an old-side line without its newline: the text to show, or
+    /// null when the line starts nothing.
+    find: *const fn (context: ?*const anyopaque, line: []const u8) ?[]const u8,
+    /// Longer text is cut here, then its trailing whitespace dropped.
+    max_len: u32 = 80,
+
+    /// First byte a letter, '_' or '$': git's default rule and GNU diff -p.
+    pub const c_function: Heading = .{ .find = cFunction };
+
+    fn cFunction(_: ?*const anyopaque, line: []const u8) ?[]const u8 {
+        if (line.len == 0) return null;
+        const first = line[0];
+        if (std.ascii.isAlphabetic(first) or first == '_' or first == '$') return line;
+        return null;
+    }
+
+    /// Whether `line`, newline and all, starts a function.
+    fn starts(h: Heading, line: []const u8) bool {
+        const bare = if (line.len != 0 and line[line.len - 1] == '\n') line[0 .. line.len - 1] else line;
+        return h.find(h.context, bare) != null;
+    }
 };
 
 pub const HunkOptions = struct {
@@ -23,6 +53,12 @@ pub const HunkOptions = struct {
     /// hunk another change opens.
     ignore_blank_lines: bool = false,
     ignore: ?LinePredicate = null,
+    /// Widen each hunk to the whole function around its changes, functions
+    /// starting where this finds a heading: git -W. A function runs from
+    /// its heading line, and the lines above it up to a blank line or
+    /// another heading, to just before the next heading less the blank
+    /// lines before it; changes in one function share a hunk.
+    function_context: ?Heading = null,
 };
 
 /// One hunk: the lines it shows on each side, and the changes inside.
@@ -65,6 +101,27 @@ pub const HunkIterator = struct {
 
     fn endOld(c: Change) i64 {
         return @as(i64, c.old_start) + c.old_len;
+    }
+
+    fn endNew(c: Change) i64 {
+        return @as(i64, c.new_start) + c.new_len;
+    }
+
+    /// git's `get_func_line`: the first old line from `start` towards
+    /// `limit`, which it never reaches, that starts a function; -1 for none.
+    fn functionLine(it: *const HunkIterator, heading: Heading, start: i64, limit: i64) i64 {
+        const step: i64 = if (start > limit) -1 else 1;
+        var l = start;
+        while (l != limit and 0 <= l and l < it.old.len()) : (l += step) {
+            if (heading.starts(it.old.get(@intCast(l)))) return l;
+        }
+        return -1;
+    }
+
+    /// git's `is_empty_rec`: a line of git whitespace only.
+    fn emptyLine(lines: Lines, i: i64) bool {
+        for (lines.get(@intCast(i))) |c| if (!compare.isSpace(c)) return false;
+        return true;
     }
 
     pub fn next(it: *HunkIterator) ?Hunk {
@@ -114,22 +171,98 @@ pub const HunkIterator = struct {
             }
         }
 
-        const f = changes[first];
-        const l = changes[last];
-        const s1: i64 = @max(@as(i64, f.old_start) - ctx, 0);
-        const s2: i64 = @max(@as(i64, f.new_start) - ctx, 0);
-        var lctx = ctx;
-        lctx = @min(lctx, @as(i64, it.old.len()) - (@as(i64, l.old_start) + l.old_len));
-        lctx = @min(lctx, @as(i64, it.new.len()) - (@as(i64, l.new_start) + l.new_len));
-        const e1 = @as(i64, l.old_start) + l.old_len + lctx;
-        const e2 = @as(i64, l.new_start) + l.new_len + lctx;
+        const from = it.hunkStart(first);
+        const to = it.hunkEnd(last);
+        first = from.change;
+        last = to.change;
         it.at = last + 1;
         return .{
-            .old_start = @intCast(s1),
-            .old_len = @intCast(e1 - s1),
-            .new_start = @intCast(s2),
-            .new_len = @intCast(e2 - s2),
+            .old_start = @intCast(from.old),
+            .old_len = @intCast(to.old - from.old),
+            .new_start = @intCast(from.new),
+            .new_len = @intCast(to.new - from.new),
             .changes = changes[first .. last + 1],
         };
+    }
+
+    /// Where a hunk starts or ends on each side, and the change that bounds it.
+    const Bound = struct { old: i64, new: i64, change: usize };
+
+    /// The start of the hunk whose first change is `first`, widened to the
+    /// function's under `function_context` (git's xdl_emit_diff). An
+    /// ignorable change the wider context reaches is shown after all, and
+    /// becomes the first.
+    fn hunkStart(it: *const HunkIterator, first_change: usize) Bound {
+        const changes = it.changes;
+        const ctx: i64 = it.options.context;
+        const n_old: i64 = it.old.len();
+        const n_new: i64 = it.new.len();
+        var first = first_change;
+        var reached = it.at;
+        while (true) {
+            const f = changes[first];
+            var s1: i64 = @max(@as(i64, f.old_start) - ctx, 0);
+            var s2: i64 = @max(@as(i64, f.new_start) - ctx, 0);
+            const heading = it.options.function_context orelse return .{ .old = s1, .new = s2, .change = first };
+            var from: i64 = f.old_start;
+            if (from >= n_old) {
+                // Lines added at the end: a whole new function needs no
+                // more context, and anything else takes the old side's
+                // last function.
+                var at: i64 = f.new_start;
+                while (at < n_new) : (at += 1) {
+                    if (heading.starts(it.new.get(@intCast(at)))) return .{ .old = s1, .new = s2, .change = first };
+                }
+                from = n_old - 1;
+            }
+            var fs1 = it.functionLine(heading, from, -1);
+            while (fs1 > 0 and !emptyLine(it.old, fs1 - 1) and !heading.starts(it.old.get(@intCast(fs1 - 1)))) fs1 -= 1;
+            if (fs1 < 0) fs1 = 0;
+            if (fs1 < s1) {
+                s2 = @max(s2 - (s1 - fs1), 0);
+                s1 = fs1;
+                while (reached != first and endOld(changes[reached]) <= s1 and endNew(changes[reached]) <= s2) reached += 1;
+                if (reached != first) {
+                    first = reached;
+                    continue;
+                }
+            }
+            return .{ .old = s1, .new = s2, .change = first };
+        }
+    }
+
+    /// The end of the hunk whose last change is `last`, widened to the
+    /// function's under `function_context`; a change in the same function
+    /// joins the hunk, and the end is found again from it.
+    fn hunkEnd(it: *const HunkIterator, last_change: usize) Bound {
+        const changes = it.changes;
+        const ctx: i64 = it.options.context;
+        const n_old: i64 = it.old.len();
+        const n_new: i64 = it.new.len();
+        var last = last_change;
+        while (true) {
+            const l = changes[last];
+            var lctx = ctx;
+            lctx = @min(lctx, n_old - endOld(l));
+            lctx = @min(lctx, n_new - endNew(l));
+            var e1 = endOld(l) + lctx;
+            var e2 = endNew(l) + lctx;
+            const heading = it.options.function_context orelse return .{ .old = e1, .new = e2, .change = last };
+            var fe1 = it.functionLine(heading, endOld(l), n_old);
+            while (fe1 > 0 and emptyLine(it.old, fe1 - 1)) fe1 -= 1;
+            if (fe1 < 0) fe1 = n_old;
+            if (fe1 > e1) {
+                e2 = @min(e2 + (fe1 - e1), n_new);
+                e1 = fe1;
+            }
+            if (last + 1 < changes.len) {
+                const next_start = @min(@as(i64, changes[last + 1].old_start), n_old - 1);
+                if (next_start - ctx <= e1 or it.functionLine(heading, next_start, e1) < 0) {
+                    last += 1;
+                    continue;
+                }
+            }
+            return .{ .old = e1, .new = e2, .change = last };
+        }
     }
 };

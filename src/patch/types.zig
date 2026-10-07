@@ -87,6 +87,12 @@ pub const ApplyOptions = struct {
     /// added.
     reverse: bool = false,
     rejects: Rejects = .fail,
+    /// When given, set to whether the first hunk fails as given but is
+    /// found the other way round, at the same fuzz: GNU patch's "Reversed
+    /// (or previously applied) patch detected!". The patch still applies as
+    /// given, as GNU patch's -f does; applying it again with `reverse`
+    /// flipped is what GNU patch's -t does.
+    reversed_hint: ?*bool = null,
 };
 
 /// What became of one hunk.

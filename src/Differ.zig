@@ -60,6 +60,13 @@ pub const Options = struct {
     /// order allows: git --anchored. Read by patience only (git's --anchored
     /// selects patience).
     anchors: []const []const u8 = &.{},
+    /// A flag the caller may raise, from another thread, to abandon the
+    /// call. It is read once per work unit and once per histogram or
+    /// patience region; from the first time it reads true, what is left is
+    /// described as one deletion and one insertion, as when `max_work` runs
+    /// out, so the call returns soon with a result that is correct but
+    /// coarse. The caller that raised it knows to discard that result.
+    stop: ?*const std.atomic.Value(bool) = null,
 };
 
 /// A caller's test of one position of the old sequence.
@@ -81,6 +88,13 @@ pub const SequenceOptions = struct {
     /// Per-token indentation for the indentation heuristic; null is the
     /// plain slide.
     indent: ?Indent = null,
+    /// A flag the caller may raise, from another thread, to abandon the
+    /// call. It is read once per work unit and once per histogram or
+    /// patience region; from the first time it reads true, what is left is
+    /// described as one deletion and one insertion, as when `max_work` runs
+    /// out, so the call returns soon with a result that is correct but
+    /// coarse. The caller that raised it knows to discard that result.
+    stop: ?*const std.atomic.Value(bool) = null,
 };
 
 pub fn init(gpa: Allocator) Differ {
@@ -217,6 +231,7 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
         .max_work = options.max_work,
         .classes = classes,
         .indent_heuristic = options.indent_heuristic,
+        .stop = options.stop,
     }, &d.changes);
     var r = result;
     r.changes = d.changes.items;
@@ -240,6 +255,7 @@ pub fn sequences(d: *Differ, old: []const u32, new: []const u32, options: Sequen
         .max_work = options.max_work,
         .classes = options.classes,
         .indent_heuristic = options.indent != null,
+        .stop = options.stop,
     }, &d.changes);
     return d.changes.items;
 }
@@ -255,10 +271,11 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
     const o = texts.sides[1];
     const t = texts.sides[2];
     var result: threeway.Merge = .{ .base = b, .ours = o, .theirs = t, .regions = &.{}, .conflicts = 0, .style = options.style };
+    const lens: [3]u32 = .{ b.len(), o.len(), t.len() };
 
     // The sides git takes whole: both the same, or one side with no change.
     if (std.mem.eql(u8, ours, theirs)) {
-        try d.whole(if (std.mem.eql(u8, base, ours)) .unchanged else .same, texts);
+        try d.whole(if (std.mem.eql(u8, base, ours)) .unchanged else .same, lens);
         result.regions = regions.items;
         return result;
     }
@@ -272,40 +289,100 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
         .max_work = 0,
         .classes = classes,
         .indent_heuristic = false,
+        .stop = options.stop,
     };
     d.changes.clearRetainingCapacity();
     d.changes_theirs.clearRetainingCapacity();
     if (!std.mem.eql(u8, base, ours)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, ids_b, ids_o, run, &d.changes);
     if (d.changes.items.len == 0) {
-        try d.whole(.theirs, texts);
+        try d.whole(.theirs, lens);
         result.regions = regions.items;
         return result;
     }
     if (!std.mem.eql(u8, base, theirs)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, ids_b, ids_t, run, &d.changes_theirs);
     if (d.changes_theirs.items.len == 0) {
-        try d.whole(.ours, texts);
+        try d.whole(.ours, lens);
         result.regions = regions.items;
         return result;
     }
-    return threeway.solve(.{
+    result.conflicts = try threeway.solve(.{
         .gpa = d.gpa,
         .core = &d.scratch,
         .buffers = &d.merge_buffers,
-        .base = b,
-        .ours = o,
-        .theirs = t,
+        .lens = lens,
         .ids_ours = ids_o,
         .ids_theirs = ids_t,
         .classes = classes,
-        .options = options,
+        .source = .{ .lines = .{ .ours = o, .theirs = t, .compare = options.compare } },
+        .algorithm = options.algorithm,
+        .minimal = options.minimal,
+        .style = options.style,
+        .level = options.level,
+        .stop = options.stop,
     }, d.changes.items, d.changes_theirs.items);
+    result.regions = regions.items;
+    return result;
 }
 
-/// One region covering all three sides.
-fn whole(d: *Differ, kind: threeway.Region.Kind, texts: table_mod.Texts) Allocator.Error!void {
-    const b = texts.sides[0].len();
-    const o = texts.sides[1].len();
-    const t = texts.sides[2].len();
+/// The three-way merge of two interned sequences against a third (every id
+/// below `options.classes`), as regions over the three. Valid until the
+/// next call on `d`.
+pub fn mergeSequences(d: *Differ, base: []const u32, ours: []const u32, theirs: []const u32, options: threeway.SequenceOptions) Error!threeway.SequenceMerge {
+    d.work = 0;
+    const regions = &d.merge_buffers.regions;
+    regions.clearRetainingCapacity();
+    if (@as(u64, base.len) + ours.len + theirs.len > std.math.maxInt(u32)) return error.InputTooLarge;
+    if (std.debug.runtime_safety) {
+        for ([_][]const u32{ base, ours, theirs }) |side| for (side) |id| std.debug.assert(id < options.classes);
+    }
+    const lens: [3]u32 = .{ @intCast(base.len), @intCast(ours.len), @intCast(theirs.len) };
+    if (std.mem.eql(u32, ours, theirs)) {
+        try d.whole(if (std.mem.eql(u32, base, ours)) .unchanged else .same, lens);
+        return .{ .regions = regions.items, .conflicts = 0 };
+    }
+    const run: core.Run = .{
+        .algorithm = options.algorithm,
+        .minimal = options.minimal,
+        .max_work = 0,
+        .classes = options.classes,
+        .indent_heuristic = false,
+        .stop = options.stop,
+    };
+    d.changes.clearRetainingCapacity();
+    d.changes_theirs.clearRetainingCapacity();
+    if (!std.mem.eql(u32, base, ours)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, base, ours, run, &d.changes);
+    if (d.changes.items.len == 0) {
+        try d.whole(.theirs, lens);
+        return .{ .regions = regions.items, .conflicts = 0 };
+    }
+    if (!std.mem.eql(u32, base, theirs)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, base, theirs, run, &d.changes_theirs);
+    if (d.changes_theirs.items.len == 0) {
+        try d.whole(.ours, lens);
+        return .{ .regions = regions.items, .conflicts = 0 };
+    }
+    const conflicts = try threeway.solve(.{
+        .gpa = d.gpa,
+        .core = &d.scratch,
+        .buffers = &d.merge_buffers,
+        .lens = lens,
+        .ids_ours = ours,
+        .ids_theirs = theirs,
+        .classes = options.classes,
+        .source = .{ .sequence = options.content },
+        .algorithm = options.algorithm,
+        .minimal = options.minimal,
+        .style = options.style,
+        .level = options.level,
+        .stop = options.stop,
+    }, d.changes.items, d.changes_theirs.items);
+    return .{ .regions = regions.items, .conflicts = conflicts };
+}
+
+/// One region covering all three sides, of these lengths.
+fn whole(d: *Differ, kind: threeway.Region.Kind, lens: [3]u32) Allocator.Error!void {
+    const b = lens[0];
+    const o = lens[1];
+    const t = lens[2];
     if (b == 0 and o == 0 and t == 0) return;
     try d.merge_buffers.regions.append(d.gpa, .{
         .kind = kind,

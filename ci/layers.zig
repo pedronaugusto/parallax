@@ -27,6 +27,9 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "one diff", .patterns = &.{
         "src/core.zig",
     } },
+    .{ .name = "token cleanup", .patterns = &.{
+        "src/cleanup.zig",
+    } },
     .{ .name = "refinement", .patterns = &.{
         "src/refine.zig",
     } },
@@ -72,6 +75,10 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
         "unified.corpus",
         "merge.corpus",
         "patch.corpus",
+        "function.corpus",
+        "markers.corpus",
+        "reversed.corpus",
+        "cleanup.corpus",
         "gen",
         "builtin",
     } },
@@ -90,6 +97,7 @@ pub const required = [_][]const u8{
     "src/patience.zig",
     "src/slide.zig",
     "src/core.zig",
+    "src/cleanup.zig",
     "src/refine.zig",
     "src/hunks.zig",
     "src/script.zig",

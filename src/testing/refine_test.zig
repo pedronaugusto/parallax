@@ -112,3 +112,24 @@ test "fuzz: refinement tiles every change" {
 test "sequences under every algorithm apply" {
     try support.seeded(support.sequenceOne, 0x73657175, 2000);
 }
+
+test "the semantic cleanup puts an edit on a word, and the efficiency cleanup joins close edits" {
+    const gpa = std.testing.allocator;
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    // diff-match-patch's own example: The c<ins>at c</ins>ame.
+    const new = "The cat cat came.\n";
+    const diff = try d.lines("The cat came.\n", new, .{});
+    const plain = try d.refine(diff, diff.changes[0], .{ .tokens = .chars });
+    try expectSpans(new, plain.new, &.{ .{ "The cat ca", false }, .{ "t ca", true }, .{ "me.\n", false } });
+    const semantic = try d.refine(diff, diff.changes[0], .{ .tokens = .chars, .cleanup = .semantic });
+    try expectSpans(new, semantic.new, &.{ .{ "The cat ", false }, .{ "cat ", true }, .{ "came.\n", false } });
+    // Two one-letter edits four letters apart: kept apart at an edit cost
+    // of 4, one edit at 8.
+    const close = try d.lines("The quick fox.\n", "The quack fix.\n", .{});
+    const apart = try d.refine(close, close.changes[0], .{ .tokens = .chars, .cleanup = .efficiency });
+    try expectSpans("The quack fix.\n", apart.new, &.{ .{ "The qu", false }, .{ "a", true }, .{ "ck f", false }, .{ "i", true }, .{ "x.\n", false } });
+    const joined = try d.refine(close, close.changes[0], .{ .tokens = .chars, .cleanup = .efficiency, .edit_cost = 8 });
+    try expectSpans("The quick fox.\n", joined.old, &.{ .{ "The qu", false }, .{ "ick fo", true }, .{ "x.\n", false } });
+    try expectSpans("The quack fix.\n", joined.new, &.{ .{ "The qu", false }, .{ "ack fi", true }, .{ "x.\n", false } });
+}

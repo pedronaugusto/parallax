@@ -3,11 +3,11 @@
 parallax is a line diff and a three-way line merge in Zig. Its output is git's,
 byte for byte: the same edit scripts under Myers, minimal, patience, anchored and
 histogram, the same hunks and unified body, and the same merged text in the
-merge, diff3 and zdiff3 styles. The same algorithms diff any sequence and refine
-a changed line down to the words or characters that differ, and unified patches
-parse and apply with GNU patch's offset and fuzz rules. It has no Io: every call
-is pure computation, and a reusable workspace makes no allocation once it is
-warm.
+merge, diff3 and zdiff3 styles. The same algorithms diff and merge any sequence
+and refine a changed line down to the words or characters that differ, conflict
+markers read back as git's rerere reads them, and unified patches parse and apply
+with GNU patch's offset and fuzz rules. It has no Io: every call is pure
+computation, and a reusable workspace makes no allocation once it is warm.
 
 ## Install
 
@@ -140,7 +140,11 @@ so stack use is constant: the deep inputs diff on a 64 KiB stack.
 
 `Options.max_work` caps the work a diff may do, in Myers sweeps; past it the rest
 is described as one deletion and one insertion. The cap is a count, not a clock,
-so the answer is the same on every machine.
+so the answer is the same on every machine. `Options.stop` is the flag a caller
+raises instead, from any thread, when it no longer wants the answer: it is read
+once per sweep and once per region, and from then on the rest is described the
+same way, so the call returns soon with a script that is still correct. Merges
+and refinements take it too.
 
 A merge interns its three texts into one table, diffs both sides against the
 base, and walks the two scripts as git does. The style and level decide whether a
@@ -166,11 +170,14 @@ whitespace and the two can match.
 
 ### Hunks and the unified body
 
-`HunkOptions` has git's `-U`, `--inter-hunk-context`, `--ignore-blank-lines` and
-`-I` (a caller's predicate on each line, given with its newline). `writeUnified`
-writes the `@@` lines, the heading a `Heading` finds (`Heading.c_function` is
-git's default rule), context taken from the new side as git prints it, and
-`\ No newline at end of file`.
+`HunkOptions` has git's `-U`, `--inter-hunk-context`, `--ignore-blank-lines`,
+`-I` (a caller's predicate on each line, given with its newline) and `-W`:
+`function_context` widens each hunk to the whole function around its changes,
+from the line a `Heading` finds, with the comment lines above it, to the next
+one, and changes in one function share a hunk, as git's do (git's hunks then
+sometimes overlap, and so do these). `writeUnified` writes the `@@` lines, the
+heading a `Heading` finds (`Heading.c_function` is git's default rule), context
+taken from the new side as git prints it, and `\ No newline at end of file`.
 
 ### Sequences and refinement
 
@@ -187,6 +194,13 @@ break is found. The token ids are diffed and slid, and come back as byte spans,
 changed or not, that cover the change's lines and never cross a line end. A
 change with an empty side is one changed span per line. Tokens compare under the
 options' `Compare`, so case and whitespace can be overlooked inside a line too.
+
+`RefineOptions.cleanup` runs diff-match-patch's cleanups over the token script
+first, measured in tokens. `.semantic` is for a reader: an equality no longer
+than the edits on both sides of it goes, each edit between two equalities slides
+to the best word or line boundary, and what a deletion ends with and the
+insertion after it starts with becomes an equality. `.efficiency` is for a
+machine: an equality shorter than `edit_cost` between edits goes.
 
 ### Patches
 
@@ -208,7 +222,11 @@ file, and the other way round at the end. Context lines are taken from the base,
 never from the patch, so ignored context is kept. `reverse` applies the patch
 backwards. Each hunk reports where it applied, its offset and the fuzz it took,
 or that it was rejected; `rejects = .skip` goes on past a rejected hunk, as GNU
-patch does, and `.fail` stops at it.
+patch does, and `.fail` stops at it. With `reversed_hint`, a first hunk that
+does not apply is looked for the other way round too, and the hint says whether
+it was found there: GNU patch's "Reversed (or previously applied) patch
+detected!". The patch still applies as given; applying it again with `reverse`
+flipped is what GNU patch's `-t` does.
 
 ### Merge styles and levels
 
@@ -222,6 +240,14 @@ patch does, and `.fail` stops at it.
 diff3 is capped at eager, as in git. `Resolve` is `markers`, `ours`, `theirs` or
 `both` (git's union).
 
+`Differ.mergeSequences` merges any three interned sequences the same way, in
+every style and level; `content` tells `.zealous_alnum` which tokens count as
+having a letter or digit. `merge.parseMarkers` reads marked text back, one part
+at a time and allocating nothing: plain text, or a conflict with our side, the
+base when there is one, their side and the labels. It reads markers as git's
+rerere does, a conflict nested in a side staying in that side, and also takes a
+marker alone on its line, which `write` writes for an empty label.
+
 ## API
 
 | Call | Does |
@@ -230,6 +256,7 @@ diff3 is capped at eager, as in git. `Resolve` is `markers`, `ours`, `theirs` or
 | `differ.lines(old, new, options)` | The line diff of two texts, as a `Diff` borrowing the inputs and the workspace |
 | `differ.sequences(old, new, options)` | The diff of two sequences of ids below `options.classes` |
 | `differ.merge(base, ours, theirs, options)` | The three-way merge, as regions |
+| `differ.mergeSequences(base, ours, theirs, options)` | The three-way merge of id sequences below `options.classes` |
 | `differ.refine(diff, change, options)` | The changed and unchanged spans inside one change |
 | `Interner(T, Context)` | Dense ids for any type: `intern`, `internSlice`, `classes`, `get`, `clear` |
 | `diffLines(gpa, old, new, options)` | A one-shot diff that owns its memory |
@@ -238,6 +265,7 @@ diff3 is capped at eager, as in git. `Resolve` is `markers`, `ours`, `theirs` or
 | `writeUnified(w, diff, options)` | The unified body, optionally with `---`/`+++` lines |
 | `merge.write(w, merge, options)` | The merged text with labels, marker size and resolution |
 | `merge.mergeAlloc(gpa, base, ours, theirs, options, write_options)` | Merge and write in one call |
+| `merge.parseMarkers(text, options)` | The text and conflicts of marked text, one part at a time |
 | `patch.parse(gpa, text, options)` | The files and hunks of a unified patch, borrowing the text |
 | `patch.apply(gpa, w, base, file, options, results)` | The base with one file's hunks applied, and each hunk's result |
 
@@ -278,31 +306,51 @@ reference: a corpus captured once from git 2.55 and committed as data
 algorithm, 1,483 unified bodies across context, inter-hunk context, headings, the
 whitespace flags, `--ignore-blank-lines` and `-I`, and 3,015 merges in every style,
 algorithm, label, marker size and resolution, with `merge-tree`'s blobs for the
-merge machinery's level and whitespace options. parallax must reproduce every
-byte. GNU patch 2.8 is the reference for applying: 488 applications captured from
-it (`testdata/gnu-patch-2.8/`) cover offsets, fuzz, reverse and rejected hunks,
-and parallax must write the same text and report the same fuzz and offset for
-every hunk.
+merge machinery's level and whitespace options, and 282 whole-function bodies
+(`-W`). parallax must reproduce every byte, and the merges again over interned
+lines. git's rerere is the reference for reading markers back: 680 marked texts
+(git merge-file's in every style and three marker sizes, malformed, nested and
+random ones) must parse, or fail, as rerere parses them, conflict for conflict.
+GNU patch 2.8 is the reference for applying: 488 applications captured from it
+(`testdata/gnu-patch-2.8/`) cover offsets, fuzz, reverse and rejected hunks, and
+400 more in its batch mode the patches it takes for reversed or already applied;
+parallax must write the same text and report the same fuzz and offset for every
+hunk. diff-match-patch 20241021 is the reference for the cleanups: its diffs of
+609 text pairs, cleaned up by parallax's passes, must come out as its own
+semantic and efficiency cleanups leave them.
 
 Properties run on seeded inputs in every `zig build test`, and under the fuzzer
 with `zig build test --fuzz`: every script applies, under every algorithm,
-comparison and work cap, for lines and for id sequences; a minimal script is
-never longer; lines of one form always match; refined spans tile every changed
-line and the unchanged ones read the same on both sides; a merge's regions cover
-our side in order, an unchanged side gives the other, and the markers read back
-give each side's resolution. A written patch parses back to its hunks and applies
-forwards and backwards, and the parse takes any bytes, failing only with its own
-errors. A warm workspace is counted to make no allocation, every allocation
-failure is survived without a leak, the adversarial workloads are held to
-recorded work units and scripts, and the deep inputs run on a 64 KiB stack.
+comparison, work cap and a raised stop flag, for lines and for id sequences; a
+minimal script is never longer; hunks hold their changes, with whole functions
+too; lines of one form always match; refined spans tile every changed line under
+every cleanup and the unchanged ones read the same on both sides; a merge's
+regions cover our side in order, an unchanged side gives the other, the markers
+read back give each side's lines and resolution, and the merge over interned
+lines gives the same regions. A written patch parses back to its hunks and
+applies forwards and backwards with no reversed hint, the parse takes any bytes,
+failing only with its own errors, and marked text of any shape reads back as
+parts that tile it. A warm workspace is counted to make no allocation, every
+allocation failure is survived without a leak, the adversarial workloads are
+held to recorded work units and scripts, a stop flag raised before or during a
+diff ends it with a script that applies, and the deep inputs run on a 64 KiB
+stack.
 
 `zig build bench -- [--smoke] [--json] [--runs N] [--only W1,W5]` times parallax's
 own workloads in ReleaseFast: large files with few and many edits, the
 adversarial shapes, many small diffs through one workspace with their latency and
 allocations, the whitespace flags, merges with many conflicts, each beside the
 code parallax replaces, the refinement of every replaced line, and patches parsed
-and applied as they are, shifted and with their context changed. CI compiles
-the benchmarks and never times them.
+and applied as they are, shifted and with their context changed. `zig build
+bench-corpus -- --repo <git repository> --out <directory>` collects the
+changed files of a range of real history (Linux v6.11..v6.12 unless `--range`
+says otherwise) into a directory outside this repository, checked against
+`bench/linux-v6.11-v6.12.manifest`; `zig build bench -- --corpus <directory>`
+then also times every changed file of the range, the large ones apart, and the
+merges of its merge commits. `zig build cli -Doptimize=ReleaseFast` builds
+`bench/cli`, a small command that diffs, merges and applies files, for timing
+parallax end to end against other tools. CI compiles the benchmarks and never
+times them.
 
 ## Licence
 

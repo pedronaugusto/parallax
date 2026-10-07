@@ -37,11 +37,13 @@ test "a warm Differ allocates nothing, for any algorithm or a merge" {
         }
     }
     for ([_]parallax.Tokens{ .words, .chars, .bytes }) |tokens| {
-        const diff = try d.lines(small.old, small.new, .{});
-        for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = tokens });
-        const warm = counts(&counting);
-        for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = tokens });
-        try std.testing.expectEqual(warm, counts(&counting));
+        for ([_]parallax.Cleanup{ .none, .semantic, .efficiency }) |cleanup| {
+            const diff = try d.lines(small.old, small.new, .{});
+            for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = tokens, .cleanup = cleanup });
+            const warm = counts(&counting);
+            for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = tokens, .cleanup = cleanup });
+            try std.testing.expectEqual(warm, counts(&counting));
+        }
     }
     for ([_]parallax.merge.Style{ .merge, .diff3, .zdiff3 }) |style| {
         const options: parallax.merge.Options = .{ .algorithm = .histogram, .style = style };
@@ -50,6 +52,34 @@ test "a warm Differ allocates nothing, for any algorithm or a merge" {
         _ = try d.merge(triple.base, triple.ours, triple.theirs, options);
         try std.testing.expectEqual(warm, counts(&counting));
     }
+    // The same merge over ids.
+    var ids: [3][]u32 = undefined;
+    var classes: u32 = 0;
+    for (&ids, [_][]const u8{ triple.base, triple.ours, triple.theirs }) |*side, text| {
+        side.* = try lineIds(gpa, text, &classes);
+    }
+    defer for (ids) |side| gpa.free(side);
+    for ([_]parallax.merge.Style{ .merge, .diff3, .zdiff3 }) |style| {
+        const options: parallax.merge.SequenceOptions = .{ .algorithm = .histogram, .style = style, .classes = classes };
+        _ = try d.mergeSequences(ids[0], ids[1], ids[2], options);
+        const warm = counts(&counting);
+        _ = try d.mergeSequences(ids[0], ids[1], ids[2], options);
+        try std.testing.expectEqual(warm, counts(&counting));
+    }
+}
+
+/// Each line's id, the same line the same id across every call.
+fn lineIds(gpa: std.mem.Allocator, text: []const u8, classes: *u32) ![]u32 {
+    var ids: std.ArrayList(u32) = .empty;
+    errdefer ids.deinit(gpa);
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |line| {
+        if (it.peek() == null and line.len == 0) break;
+        const id: u32 = @truncate(std.hash.Wyhash.hash(0, line) % 4096);
+        classes.* = @max(classes.*, id + 1);
+        try ids.append(gpa, id);
+    }
+    return ids.toOwnedSlice(gpa);
 }
 
 /// The script's numbers, little-endian, hashed: the same on every target.
@@ -164,6 +194,15 @@ fn refineAll(gpa: std.mem.Allocator, old: []const u8, new: []const u8) !void {
     defer d.deinit();
     const diff = try d.lines(old, new, .{});
     for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = .chars });
+    for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = .chars, .cleanup = .semantic });
+    for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = .words, .cleanup = .efficiency });
+}
+
+fn mergeIds(gpa: std.mem.Allocator, base: []const u32, ours: []const u32, theirs: []const u32, classes: u32) !void {
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = classes, .style = .zdiff3 });
+    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = classes, .algorithm = .histogram });
 }
 
 fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: []const u8) !void {
@@ -183,6 +222,79 @@ test "every allocation failure is survived without a leak" {
     const triple = try gen.w7b(gpa, 60);
     defer triple.deinit(gpa);
     try std.testing.checkAllAllocationFailures(gpa, mergeAll, .{ triple.base, triple.ours, triple.theirs });
+    var ids: [3][]u32 = undefined;
+    var classes: u32 = 0;
+    for (&ids, [_][]const u8{ triple.base, triple.ours, triple.theirs }) |*side, text| side.* = try lineIds(gpa, text, &classes);
+    defer for (ids) |side| gpa.free(side);
+    try std.testing.checkAllAllocationFailures(gpa, mergeIds, .{ ids[0], ids[1], ids[2], classes });
+}
+
+test "a stop flag raised before a diff leaves no work and a script that applies" {
+    const gpa = std.testing.allocator;
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const raised: std.atomic.Value(bool) = .init(true);
+    for ([_][]const u8{ "W3b", "W3c", "W3d" }) |name| {
+        const pair = try workload(gpa, name);
+        defer pair.deinit(gpa);
+        for ([_]parallax.Algorithm{ .myers, .patience, .histogram }) |algorithm| {
+            const diff = try d.lines(pair.old, pair.new, .{ .algorithm = algorithm, .stop = &raised });
+            try std.testing.expectEqual(@as(u64, 0), d.work);
+            try support.expectApplies(diff);
+        }
+    }
+    const triple = try gen.w7b(gpa, 1000);
+    defer triple.deinit(gpa);
+    const m = try d.merge(triple.base, triple.ours, triple.theirs, .{ .stop = &raised });
+    var at: u32 = 0;
+    for (m.regions) |r| {
+        try std.testing.expectEqual(at, r.ours.start);
+        at += r.ours.len;
+    }
+    try std.testing.expectEqual(m.ours.len(), at);
+}
+
+/// Raises the flag it is given the first time patience asks about an
+/// anchor: a caller stopping the diff while it runs.
+fn raiseOnFirstAnchor(context: ?*const anyopaque, _: u32) bool {
+    const flag: *std.atomic.Value(bool) = @ptrCast(@alignCast(@constCast(context.?))); // safe: the test passes its flag
+    flag.store(true, .monotonic);
+    return false;
+}
+
+test "a stop flag raised while a diff runs ends it early with a script that applies" {
+    const gpa = std.testing.allocator;
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const pair = try gen.w2(gpa, 2000, 0.3);
+    defer pair.deinit(gpa);
+    // Lines interned once, so the sequence diff and its anchor callback see
+    // the same ids.
+    var classes: u32 = 0;
+    const old = try lineIds(gpa, pair.old, &classes);
+    defer gpa.free(old);
+    const new = try lineIds(gpa, pair.new, &classes);
+    defer gpa.free(new);
+    const whole = try gpa.dupe(parallax.Change, try d.sequences(old, new, .{ .classes = classes, .algorithm = .patience }));
+    defer gpa.free(whole);
+    var flag: std.atomic.Value(bool) = .init(false);
+    const stopped = try d.sequences(old, new, .{
+        .classes = classes,
+        .algorithm = .patience,
+        .anchor = .{ .context = @ptrCast(&flag), .at = raiseOnFirstAnchor }, // safe: raiseOnFirstAnchor reads it back as the flag
+        .stop = &flag,
+    });
+    try std.testing.expect(flag.load(.monotonic));
+    // Coarser: fewer, larger changes, still a script from old to new.
+    try std.testing.expect(stopped.len < whole.len);
+    var at_old: u32 = 0;
+    var at_new: u32 = 0;
+    for (stopped) |c| {
+        try std.testing.expectEqualSlices(u32, old[at_old..c.old_start], new[at_new..c.new_start]);
+        at_old = c.old_start + c.old_len;
+        at_new = c.new_start + c.new_len;
+    }
+    try std.testing.expectEqualSlices(u32, old[at_old..], new[at_new..]);
 }
 
 test "an input a u32 cannot index is refused" {

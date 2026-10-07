@@ -13,6 +13,10 @@ const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
 const Interner = @import("interner.zig").Interner;
+const cleanup_mod = @import("cleanup.zig");
+
+/// What refinement does to the token script before it becomes spans.
+pub const Cleanup = cleanup_mod.Cleanup;
 
 /// How a line is cut into tokens.
 pub const Tokens = enum {
@@ -30,6 +34,20 @@ pub const RefineOptions = struct {
     algorithm: Algorithm = .histogram,
     /// Tokens are equal when their comparison forms are.
     compare: Compare = .{},
+    /// diff-match-patch's cleanups over the token script, measured in
+    /// tokens.
+    cleanup: Cleanup = .none,
+    /// For `.efficiency`: what one edit costs, in tokens; an equality
+    /// shorter than this between edits goes (diff-match-patch's
+    /// `Diff_EditCost`).
+    edit_cost: u32 = 4,
+    /// A flag the caller may raise, from another thread, to abandon the
+    /// call. It is read once per work unit and once per histogram or
+    /// patience region; from the first time it reads true, what is left is
+    /// described as one deletion and one insertion, as when `max_work` runs
+    /// out, so the call returns soon with a result that is correct but
+    /// coarse. The caller that raised it knows to discard that result.
+    stop: ?*const std.atomic.Value(bool) = null,
 };
 
 /// Bytes `start .. start + len` of a side's text, changed or not.
@@ -57,6 +75,7 @@ pub const Buffers = struct {
     changes: std.ArrayList(Change) = .empty,
     spans: [2]std.ArrayList(Span) = .{ .empty, .empty },
     interner: ?Interner([]const u8, TokenContext) = null,
+    cleanup: cleanup_mod.Buffers = .{},
 
     pub fn deinit(b: *Buffers, gpa: Allocator) void {
         for (&b.ends) |*e| e.deinit(gpa);
@@ -64,12 +83,13 @@ pub const Buffers = struct {
         b.changes.deinit(gpa);
         for (&b.spans) |*s| s.deinit(gpa);
         if (b.interner) |*i| i.deinit();
+        b.cleanup.deinit(gpa);
         b.* = undefined;
     }
 
     /// Bytes held.
     pub fn capacity(b: *const Buffers) usize {
-        var n: usize = b.ids.capacity * 4 + b.changes.capacity * @sizeOf(Change);
+        var n: usize = b.ids.capacity * 4 + b.changes.capacity * @sizeOf(Change) + b.cleanup.capacity();
         for (b.ends) |e| n += e.capacity * 4;
         for (b.spans) |s| n += s.capacity * @sizeOf(Span);
         if (b.interner) |i| n += i.items.capacity * @sizeOf([]const u8) + i.slots.capacity * 16;
@@ -179,7 +199,15 @@ pub fn refine(in: Input) Allocator.Error!Refined {
         .max_work = 0,
         .classes = interner.classes(),
         .indent_heuristic = false,
+        .stop = in.options.stop,
     }, &b.changes);
+    try cleanup_mod.run(.{
+        .gpa = in.gpa,
+        .buffers = &b.cleanup,
+        .old = .{ .ids = b.ids.items[0..n_old], .text = sides[0].text, .from = froms[0], .ends = b.ends[0].items },
+        .new = .{ .ids = b.ids.items[n_old..], .text = sides[1].text, .from = froms[1], .ends = b.ends[1].items },
+        .edit_cost = in.options.edit_cost,
+    }, in.options.cleanup, &b.changes);
 
     for (0..2) |s| try spans(in.gpa, &b.spans[s], sides[s].text, froms[s], b.ends[s].items, b.changes.items, s == 0);
     return .{ .old = b.spans[0].items, .new = b.spans[1].items };

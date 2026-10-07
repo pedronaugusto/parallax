@@ -263,3 +263,35 @@ pub fn w7c(gpa: Allocator, lines: usize, points: usize) Allocator.Error!Triple {
     errdefer gpa.free(ours);
     return .{ .base = base, .ours = ours, .theirs = try sides[2].toOwnedSlice(gpa) };
 }
+
+/// W10: a C-shaped file of `functions` functions, comments above some,
+/// blank lines between, and an edit of it touching about one function in
+/// ten: what whole-function hunks are for.
+pub fn w10(gpa: Allocator, functions: usize) Allocator.Error!Pair {
+    const v: Vocabulary = .init();
+    var prng: std.Random.DefaultPrng = .init(0x773130);
+    const r = prng.random();
+    var old: std.ArrayList(u8) = .empty;
+    errdefer old.deinit(gpa);
+    var new: std.ArrayList(u8) = .empty;
+    errdefer new.deinit(gpa);
+    for (0..functions) |f| {
+        const touched = r.uintLessThan(u8, 10) == 0;
+        for ([_]*std.ArrayList(u8){ &old, &new }) |side| {
+            if (f % 3 == 0) try side.print(gpa, "/* {s} */\n", .{v.word(f % vocabulary_size)});
+            try side.print(gpa, "static int {s}_{d}(int n)\n{{\n", .{ v.word(f % vocabulary_size), f });
+        }
+        const body = 5 + r.uintLessThan(usize, 30);
+        for (0..body) |b| {
+            const word = v.word(r.uintLessThan(usize, vocabulary_size));
+            try old.print(gpa, "    n += {s}({d});\n", .{ word, b });
+            if (touched and r.uintLessThan(u8, 8) == 0) {
+                try new.print(gpa, "    n -= {s}({d});\n", .{ word, b });
+            } else try new.print(gpa, "    n += {s}({d});\n", .{ word, b });
+        }
+        for ([_]*std.ArrayList(u8){ &old, &new }) |side| try side.appendSlice(gpa, "    return n;\n}\n\n");
+    }
+    const old_bytes = try old.toOwnedSlice(gpa);
+    errdefer gpa.free(old_bytes);
+    return .{ .old = old_bytes, .new = try new.toOwnedSlice(gpa) };
+}

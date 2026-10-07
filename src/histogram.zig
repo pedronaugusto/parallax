@@ -44,7 +44,16 @@ pub fn diff(c: *myers.Context, h: *Buffers, a: []const u32, b: []const u32, fa: 
     var s: State = .{ .c = c, .h = h, .a = a, .b = b, .fa = fa, .fb = fb };
     h.stack.clearRetainingCapacity();
     try h.stack.append(gpa, .{ .line1 = 1, .count1 = a.len, .line2 = 1, .count2 = b.len });
-    while (h.stack.pop()) |r| try s.region(r);
+    while (h.stack.pop()) |r| {
+        // Asked to stop: what is left is one deletion and one insertion
+        // per region.
+        if (c.stop != null and c.stopped()) {
+            s.markA(r.line1, r.count1);
+            s.markB(r.line2, r.count2);
+            continue;
+        }
+        try s.region(r);
+    }
 }
 
 const State = struct {

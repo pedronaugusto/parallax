@@ -29,6 +29,7 @@ pub const Run = struct {
     max_work: u64,
     classes: u32,
     indent_heuristic: bool,
+    stop: ?*const std.atomic.Value(bool) = null,
 };
 
 /// `Source` has `fn anchor(Source, u32) bool` for old lines and
@@ -53,6 +54,7 @@ pub fn diff(
         .classes = run.classes,
         .minimal = run.minimal,
         .max_work = run.max_work,
+        .stop = run.stop,
         .buffers = &bufs.myers,
     };
     try c.prepare();

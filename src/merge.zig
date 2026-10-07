@@ -1,6 +1,6 @@
 //! The three-way line merge: `Differ.merge` gives the regions, `write`
 //! renders them as `git merge-file` writes them, and `mergeAlloc` does both
-//! in one call.
+//! in one call. `parseMarkers` reads conflict markers back out of text.
 
 const std = @import("std");
 const Io = std.Io;
@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const threeway = @import("threeway.zig");
 const Lines = @import("lines.zig").Lines;
 const Differ = @import("Differ.zig");
+const compare_mod = @import("compare.zig");
 
 pub const Style = threeway.Style;
 pub const Level = threeway.Level;
@@ -15,6 +16,8 @@ pub const Options = threeway.Options;
 pub const Range = threeway.Range;
 pub const Region = threeway.Region;
 pub const Merge = threeway.Merge;
+pub const SequenceOptions = threeway.SequenceOptions;
+pub const SequenceMerge = threeway.SequenceMerge;
 
 /// What a conflict becomes in the text.
 pub const Resolve = enum {
@@ -155,4 +158,157 @@ pub fn mergeAlloc(
         .conflicts = if (write_options.resolve == .markers) m.conflicts else 0,
         .gpa = gpa,
     };
+}
+
+/// How `parseMarkers` reads.
+pub const MarkerOptions = struct {
+    /// Characters per marker; 0 means 7, as in git. A longer run of the
+    /// character is not a marker.
+    marker_size: u32 = 7,
+};
+
+/// One conflict read back from marked text. Every slice borrows the text.
+pub const Conflict = struct {
+    /// Our side's lines as they stand between the markers. A conflict
+    /// nested inside a side stays in its bytes.
+    ours: []const u8,
+    /// The base's lines, when the conflict has them (the diff3 and zdiff3
+    /// styles); null otherwise.
+    base: ?[]const u8,
+    theirs: []const u8,
+    /// The text after each marker, without the space before it or the line
+    /// end; empty for a marker with none.
+    labels: Labels,
+    /// The whole conflict, markers included.
+    whole: []const u8,
+};
+
+/// A stretch of marked text: plain text, or one conflict.
+pub const Part = union(enum) {
+    text: []const u8,
+    conflict: Conflict,
+};
+
+pub const MarkerError = error{
+    /// The text ends inside a conflict.
+    UnterminatedConflict,
+    /// A marker out of order inside a conflict: a base or `=======` marker
+    /// after the `=======`, or a closing marker before it.
+    MisplacedMarker,
+    /// Conflicts nested more than 64 deep.
+    TooDeep,
+};
+
+/// The parts of `text`, in order: what `write` produced, read back. A
+/// conflict opens at a line of `marker_size` `<` and closes at one of `>`,
+/// each alone on its line or followed by a space and a label; between them
+/// an optional `|` line (followed by whitespace or the line end) starts the
+/// base and an `=` line their side. Marker lines outside a conflict are
+/// text, and a conflict inside a side is part of that side, as git's rerere
+/// reads them. Allocates nothing.
+pub fn parseMarkers(text: []const u8, options: MarkerOptions) MarkerIterator {
+    return .{ .text = text, .size = if (options.marker_size == 0) 7 else options.marker_size };
+}
+
+pub const MarkerIterator = struct {
+    /// Private: the text and the marker size.
+    text: []const u8,
+    size: u32,
+    /// Private: where the next part starts.
+    at: usize = 0,
+    /// Lines read so far; after an error, the 1-based line it is on.
+    line: u32 = 0,
+
+    const Side = enum(u2) { ours, base, theirs };
+
+    /// The next part, or null at the end of the text.
+    pub fn next(it: *MarkerIterator) MarkerError!?Part {
+        if (it.at >= it.text.len) return null;
+        const from = it.at;
+        if (markerLine(it.peek(), '<', it.size)) |label| return .{ .conflict = try it.conflict(label) };
+        while (it.at < it.text.len) {
+            const line = it.peek();
+            if (markerLine(line, '<', it.size) != null) break;
+            it.pass(line);
+        }
+        return .{ .text = it.text[from..it.at] };
+    }
+
+    /// The line at the cursor, with its newline.
+    fn peek(it: *const MarkerIterator) []const u8 {
+        const end = if (std.mem.findScalarPos(u8, it.text, it.at, '\n')) |nl| nl + 1 else it.text.len;
+        return it.text[it.at..end];
+    }
+
+    /// Step over `line`, the one at the cursor.
+    fn pass(it: *MarkerIterator, line: []const u8) void {
+        it.at += line.len;
+        it.line += 1;
+    }
+
+    /// One conflict, its opening marker at the cursor. Each open conflict,
+    /// the outermost first, keeps the side it is in as two bits of `sides`.
+    fn conflict(it: *MarkerIterator, label: []const u8) MarkerError!Conflict {
+        const start = it.at;
+        it.pass(it.peek());
+        var c: Conflict = .{ .ours = "", .base = null, .theirs = "", .labels = .{ .ours = label, .base = "", .theirs = "" }, .whole = "" };
+        var section = it.at;
+        var sides: u128 = 0;
+        var depth: u7 = 1;
+        while (it.at < it.text.len) {
+            const at = it.at;
+            const line = it.peek();
+            it.pass(line);
+            const shift: u7 = 2 * (depth - 1);
+            const side: Side = @fromBackingInt(@intCast(@as(u2, @truncate(sides >> shift))));
+            if (markerLine(line, '<', it.size) != null) {
+                if (depth == 64) return error.TooDeep;
+                depth += 1;
+                sides &= ~(@as(u128, 3) << (shift + 2));
+            } else if (markerLine(line, '|', it.size)) |base_label| {
+                if (side != .ours) return error.MisplacedMarker;
+                sides = (sides & ~(@as(u128, 3) << shift)) | (@as(u128, @backingInt(Side.base)) << shift);
+                if (depth == 1) {
+                    c.ours = it.text[section..at];
+                    c.labels.base = base_label;
+                    section = it.at;
+                }
+            } else if (markerLine(line, '=', it.size) != null) {
+                if (side == .theirs) return error.MisplacedMarker;
+                sides = (sides & ~(@as(u128, 3) << shift)) | (@as(u128, @backingInt(Side.theirs)) << shift);
+                if (depth == 1) {
+                    if (side == .ours) c.ours = it.text[section..at] else c.base = it.text[section..at];
+                    section = it.at;
+                }
+            } else if (markerLine(line, '>', it.size)) |theirs_label| {
+                if (side != .theirs) return error.MisplacedMarker;
+                depth -= 1;
+                if (depth == 0) {
+                    c.theirs = it.text[section..at];
+                    c.labels.theirs = theirs_label;
+                    c.whole = it.text[start..it.at];
+                    return c;
+                }
+            }
+        }
+        return error.UnterminatedConflict;
+    }
+};
+
+/// The label of `line` when it is a marker of `size` `char`s, as git's
+/// `is_cmarker` reads one: whitespace after the run, and a space before the
+/// label of an opening or closing marker. A marker alone on its line is one
+/// too, as `write` writes it for an empty label.
+fn markerLine(line: []const u8, char: u8, size: u32) ?[]const u8 {
+    if (line.len <= size) return null;
+    for (line[0..size]) |c| if (c != char) return null;
+    const rest = line[size..];
+    if (rest[0] == '\n' or std.mem.eql(u8, rest, "\r\n")) return "";
+    if (char == '<' or char == '>') {
+        if (rest[0] != ' ') return null;
+    } else if (!compare_mod.isSpace(rest[0])) return null;
+    var label = rest[1..];
+    if (label.len != 0 and label[label.len - 1] == '\n') label = label[0 .. label.len - 1];
+    if (label.len != 0 and label[label.len - 1] == '\r') label = label[0 .. label.len - 1];
+    return label;
 }

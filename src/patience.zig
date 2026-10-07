@@ -70,7 +70,16 @@ pub fn diff(
     var s: State(Anchor) = .{ .anchor = anchor, .c = c, .p = p, .a = a, .b = b, .fa = fa, .fb = fb };
     p.todo.clearRetainingCapacity();
     try p.todo.append(gpa, .{ .line1 = 0, .count1 = @intCast(a.len), .line2 = 0, .count2 = @intCast(b.len) });
-    while (p.todo.pop()) |r| try s.region(r);
+    while (p.todo.pop()) |r| {
+        // Asked to stop: what is left is one deletion and one insertion
+        // per region.
+        if (c.stop != null and c.stopped()) {
+            s.fa.setRange(r.line1, r.count1);
+            s.fb.setRange(r.line2, r.count2);
+            continue;
+        }
+        try s.region(r);
+    }
 }
 
 fn State(comptime Anchor: type) type {
