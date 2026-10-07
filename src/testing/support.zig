@@ -324,3 +324,111 @@ pub inline fn repeat(comptime bytes: []const u8, comptime times: usize) *const [
         return &final;
     }
 }
+
+/// One random diff, every change refined: the spans tile the change's
+/// lines on each side, none crosses a line end, the unchanged spans read the
+/// same on both sides, and a change with an empty side gives one changed
+/// span per line.
+pub fn refineOne(s: Source) !void {
+    const gpa = std.testing.allocator;
+    var a_buf: [256]u8 = undefined;
+    var b_buf: [320]u8 = undefined;
+    const old = text(s, &a_buf);
+    const new = edit(s, old, &b_buf);
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const diff = try d.lines(old, new, .{});
+    const tokens: parallax.Tokens = @fromBackingInt(@intCast(s.index(3)));
+    const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
+    const ignore = s.oneIn(3);
+    for (diff.changes) |c| {
+        const r = try d.refine(diff, c, .{
+            .tokens = tokens,
+            .algorithm = algorithms[s.index(3)],
+            .compare = if (ignore) .{ .ignore_case = true } else .{},
+        });
+        try expectTiles(diff.old, c.old_start, c.old_len, r.old, c.new_len == 0);
+        try expectTiles(diff.new, c.new_start, c.new_len, r.new, c.old_len == 0);
+        if (ignore or c.old_len == 0 or c.new_len == 0) continue;
+        var kept_old: std.ArrayList(u8) = .empty;
+        defer kept_old.deinit(gpa);
+        var kept_new: std.ArrayList(u8) = .empty;
+        defer kept_new.deinit(gpa);
+        for (r.old) |span| if (!span.changed) try kept_old.appendSlice(gpa, diff.old.text[span.start..][0..span.len]);
+        for (r.new) |span| if (!span.changed) try kept_new.appendSlice(gpa, diff.new.text[span.start..][0..span.len]);
+        try std.testing.expectEqualStrings(kept_old.items, kept_new.items);
+    }
+}
+
+fn expectTiles(lines: parallax.Lines, start: u32, len: u32, spans: []const parallax.Span, one_per_line: bool) !void {
+    if (len == 0) return std.testing.expectEqual(@as(usize, 0), spans.len);
+    var at = lines.start(start);
+    for (spans) |span| {
+        try std.testing.expectEqual(at, span.start);
+        try std.testing.expect(span.len != 0);
+        const bytes = lines.text[span.start..][0..span.len];
+        if (std.mem.findScalar(u8, bytes, '\n')) |nl| try std.testing.expectEqual(bytes.len - 1, nl);
+        if (one_per_line) try std.testing.expect(span.changed);
+        at += span.len;
+    }
+    try std.testing.expectEqual(lines.ends[start + len - 1], at);
+    if (one_per_line) try std.testing.expectEqual(@as(usize, len), spans.len);
+}
+
+/// Random id sequences under every algorithm: the script applies.
+pub fn sequenceOne(s: Source) !void {
+    const gpa = std.testing.allocator;
+    var old: [64]u32 = undefined;
+    var new: [64]u32 = undefined;
+    const classes: u32 = @intCast(1 + s.index(8));
+    const n_old = s.index(old.len);
+    const n_new = s.index(new.len);
+    for (old[0..n_old]) |*id| id.* = @intCast(s.index(classes));
+    for (new[0..n_new], 0..) |*id, i| id.* = if (i < n_old and !s.oneIn(3)) old[i] else @intCast(s.index(classes));
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
+    const changes = try d.sequences(old[0..n_old], new[0..n_new], .{
+        .classes = classes,
+        .algorithm = algorithms[s.index(3)],
+        .minimal = s.boolean(),
+        .max_work = if (s.oneIn(4)) 2 else 0,
+    });
+    var at_old: u32 = 0;
+    var at_new: u32 = 0;
+    for (changes) |c| {
+        try std.testing.expectEqualSlices(u32, old[at_old..c.old_start], new[at_new..c.new_start]);
+        at_old = c.old_start + c.old_len;
+        at_new = c.new_start + c.new_len;
+    }
+    try std.testing.expectEqualSlices(u32, old[at_old..n_old], new[at_new..n_new]);
+}
+
+/// An allocator that never grows or moves memory in place, so the number
+/// of allocations a call makes is the same on every run: the backing for
+/// `std.testing.checkAllAllocationFailures`.
+pub const NoResize = struct {
+    inner: std.mem.Allocator,
+
+    pub fn allocator(n: *NoResize) std.mem.Allocator {
+        return .{ .ptr = n, .vtable = &.{ .alloc = alloc, .resize = resize, .remap = remap, .free = free } };
+    }
+
+    fn alloc(ctx: *anyopaque, len: usize, a: std.mem.Alignment, ra: usize) ?[*]u8 {
+        const n: *NoResize = @ptrCast(@alignCast(ctx)); // safe: ctx is the NoResize this allocator was made from
+        return n.inner.rawAlloc(len, a, ra);
+    }
+
+    fn resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
+        return false;
+    }
+
+    fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+        return null;
+    }
+
+    fn free(ctx: *anyopaque, m: []u8, a: std.mem.Alignment, ra: usize) void {
+        const n: *NoResize = @ptrCast(@alignCast(ctx)); // safe: ctx is the NoResize this allocator was made from
+        n.inner.rawFree(m, a, ra);
+    }
+};

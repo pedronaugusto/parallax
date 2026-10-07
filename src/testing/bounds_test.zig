@@ -6,6 +6,7 @@
 const std = @import("std");
 const parallax = @import("../parallax.zig");
 const gen = @import("gen");
+const support = @import("support.zig");
 const builtin = @import("builtin");
 
 const Counts = struct { allocations: usize, resizes: usize, frees: usize };
@@ -34,6 +35,13 @@ test "a warm Differ allocates nothing, for any algorithm or a merge" {
             _ = try d.lines(small.old, small.new, options);
             try std.testing.expectEqual(warm, counts(&counting));
         }
+    }
+    for ([_]parallax.Tokens{ .words, .chars, .bytes }) |tokens| {
+        const diff = try d.lines(small.old, small.new, .{});
+        for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = tokens });
+        const warm = counts(&counting);
+        for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = tokens });
+        try std.testing.expectEqual(warm, counts(&counting));
     }
     for ([_]parallax.merge.Style{ .merge, .diff3, .zdiff3 }) |style| {
         const options: parallax.merge.Options = .{ .algorithm = .histogram, .style = style };
@@ -151,6 +159,13 @@ fn diffAll(gpa: std.mem.Allocator, old: []const u8, new: []const u8) !void {
     _ = try e.lines(old, new, .{ .minimal = true });
 }
 
+fn refineAll(gpa: std.mem.Allocator, old: []const u8, new: []const u8) !void {
+    var d: parallax.Differ = .init(gpa);
+    defer d.deinit();
+    const diff = try d.lines(old, new, .{});
+    for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = .chars });
+}
+
 fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: []const u8) !void {
     var m = try parallax.merge.mergeAlloc(gpa, base, ours, theirs, .{ .style = .zdiff3 }, .{});
     defer m.deinit();
@@ -159,10 +174,12 @@ fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: 
 }
 
 test "every allocation failure is survived without a leak" {
-    const gpa = std.testing.allocator;
+    var fixed: support.NoResize = .{ .inner = std.testing.allocator };
+    const gpa = fixed.allocator();
     const pair = try gen.w2(gpa, 120, 0.2);
     defer pair.deinit(gpa);
     try std.testing.checkAllAllocationFailures(gpa, diffAll, .{ pair.old, pair.new });
+    try std.testing.checkAllAllocationFailures(gpa, refineAll, .{ pair.old, pair.new });
     const triple = try gen.w7b(gpa, 60);
     defer triple.deinit(gpa);
     try std.testing.checkAllAllocationFailures(gpa, mergeAll, .{ triple.base, triple.ours, triple.theirs });

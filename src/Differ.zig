@@ -20,6 +20,7 @@ const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
 const Diff = @import("script.zig").Diff;
 const threeway = @import("threeway.zig");
+const refine_mod = @import("refine.zig");
 
 gpa: Allocator,
 /// Private: the algorithms' scratch.
@@ -35,6 +36,8 @@ changes: std.ArrayList(Change) = .empty,
 changes_theirs: std.ArrayList(Change) = .empty,
 /// Private: the merge's scratch.
 merge_buffers: threeway.Buffers = .{},
+/// Private: the refinement's scratch.
+refine_buffers: refine_mod.Buffers = .{},
 /// Private: work units the last call spent, which the tests read.
 work: u64 = 0,
 
@@ -91,6 +94,7 @@ pub fn deinit(d: *Differ) void {
         }
     }.f);
     d.table.deinit(d.gpa);
+    d.refine_buffers.deinit(d.gpa);
     d.* = undefined;
 }
 
@@ -98,6 +102,7 @@ pub fn deinit(d: *Differ) void {
 /// caller after one huge diff. The next call allocates again.
 pub fn shrink(d: *Differ, keep: usize) void {
     var total: usize = d.table.slots.capacity * @sizeOf(@TypeOf(d.table.slots.items[0]));
+    total += d.refine_buffers.capacity();
     d.eachList(&total, struct {
         fn f(sum: *usize, list: anytype) void {
             sum.* += list.capacity * @sizeOf(@TypeOf(list.items[0]));
@@ -110,6 +115,8 @@ pub fn shrink(d: *Differ, keep: usize) void {
         }
     }.f);
     d.table.slots.clearAndFree(d.gpa);
+    d.refine_buffers.deinit(d.gpa);
+    d.refine_buffers = .{};
 }
 
 fn eachList(d: *Differ, context: anytype, comptime f: anytype) void {
@@ -305,5 +312,20 @@ fn whole(d: *Differ, kind: threeway.Region.Kind, texts: table_mod.Texts) Allocat
         .base = .{ .start = 0, .len = b },
         .ours = .{ .start = 0, .len = o },
         .theirs = .{ .start = 0, .len = t },
+    });
+}
+
+/// Which bytes inside one change of `diff` (a replace) differ, as spans of
+/// tokens, for inline highlighting. `diff` may come from an earlier call on
+/// `d`: refining does not disturb it. Valid until the next call on `d`.
+pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.RefineOptions) Allocator.Error!refine_mod.Refined {
+    return refine_mod.refine(.{
+        .gpa = d.gpa,
+        .core = &d.scratch,
+        .buffers = &d.refine_buffers,
+        .old = diff.old,
+        .new = diff.new,
+        .change = change,
+        .options = options,
     });
 }

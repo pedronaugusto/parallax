@@ -6,6 +6,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/compare.zig",
         "src/lines.zig",
         "src/flags.zig",
+        "src/interner.zig",
     } },
     .{ .name = "changes", .patterns = &.{
         "src/change.zig",
@@ -25,6 +26,9 @@ pub const layers: []const gantry.rules.Layer = &.{
     } },
     .{ .name = "one diff", .patterns = &.{
         "src/core.zig",
+    } },
+    .{ .name = "refinement", .patterns = &.{
+        "src/refine.zig",
     } },
     .{ .name = "hunks", .patterns = &.{
         "src/hunks.zig",
@@ -67,6 +71,7 @@ pub const required = [_][]const u8{
     "src/compare.zig",
     "src/lines.zig",
     "src/flags.zig",
+    "src/interner.zig",
     "src/change.zig",
     "src/table.zig",
     "src/myers.zig",
@@ -74,6 +79,7 @@ pub const required = [_][]const u8{
     "src/patience.zig",
     "src/slide.zig",
     "src/core.zig",
+    "src/refine.zig",
     "src/hunks.zig",
     "src/script.zig",
     "src/threeway.zig",

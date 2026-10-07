@@ -59,6 +59,17 @@ pub const Heading = unified.Heading;
 pub const UnifiedOptions = unified.UnifiedOptions;
 /// Write a diff as a unified diff body, as git prints it.
 pub const writeUnified = unified.writeUnified;
+/// Dense ids for any type with a hash and an equality.
+pub const Interner = @import("interner.zig").Interner;
+const refine = @import("refine.zig");
+/// How `Differ.refine` cuts lines into tokens.
+pub const Tokens = refine.Tokens;
+/// How `Differ.refine` diffs tokens.
+pub const RefineOptions = refine.RefineOptions;
+/// Bytes of one side, changed or not.
+pub const Span = refine.Span;
+/// The spans of one change, per side.
+pub const Refined = refine.Refined;
 /// The three-way merge.
 pub const merge = @import("merge.zig");
 
@@ -106,4 +117,6 @@ test {
     _ = lines_mod;
     _ = @import("table.zig");
     _ = @import("slide.zig");
+    _ = @import("interner.zig");
+    _ = @import("refine.zig");
 }

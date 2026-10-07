@@ -3,8 +3,10 @@
 parallax is a line diff and a three-way line merge in Zig. Its output is git's,
 byte for byte: the same edit scripts under Myers, minimal, patience, anchored and
 histogram, the same hunks and unified body, and the same merged text in the
-merge, diff3 and zdiff3 styles. It has no Io: every call is pure computation, and
-a reusable workspace makes no allocation once it is warm.
+merge, diff3 and zdiff3 styles. The same algorithms diff any sequence, and refine
+a changed line down to the words or characters that differ. It has no Io: every
+call is pure computation, and a reusable workspace makes no allocation once it
+is warm.
 
 ## Install
 
@@ -49,7 +51,7 @@ defer differ.deinit();
 const m = try differ.merge("one\nbase\nend\n", "one\nours\nend\n", "one\ntheirs\nend\n", .{ .style = .diff3 });
 std.debug.assert(m.conflicts == 1);
 for (m.regions) |region| switch (region.kind) {
-    .conflict => std.debug.assert(region.ours.start == 1 and region.ours.len == 1),
+    .conflict => std.debug.assert(region.ours.start == 1),
     else => {},
 };
 // The text `git merge-file --diff3` writes.
@@ -57,6 +59,35 @@ var out: std.Io.Writer.Allocating = .init(gpa);
 defer out.deinit();
 try parallax.merge.write(&out.writer, m, .{ .labels = .{ .ours = "HEAD", .base = "base", .theirs = "topic" } });
 std.debug.assert(std.mem.startsWith(u8, out.written(), "one\n<<<<<<< HEAD\nours\n||||||| base\nbase\n=======\ntheirs\n>>>>>>> topic\n"));
+```
+<!-- END GENERATED -->
+
+Refinement and generic sequences:
+
+<!-- BEGIN GENERATED zig build docs -- refine -->
+```zig
+const parallax = @import("parallax");
+
+var differ: parallax.Differ = .init(gpa);
+defer differ.deinit();
+const old = "let total = sum(a, b);\n";
+const new = "let total = sum(a, c);\n";
+const diff = try differ.lines(old, new, .{});
+// Which words of a changed line differ, as spans that never cross a line.
+const refined = try differ.refine(diff, diff.changes[0], .{ .tokens = .words });
+for (refined.new) |span| {
+    if (span.changed) std.debug.assert(std.mem.eql(u8, new[span.start..][0..span.len], "c"));
+}
+// Any sequence diffs once interned: here, words.
+var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
+defer interner.deinit();
+var a: [3]u32 = undefined;
+var b: [3]u32 = undefined;
+try interner.internSlice(&.{ "red", "green", "blue" }, &a);
+try interner.internSlice(&.{ "red", "yellow", "blue" }, &b);
+const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() });
+std.debug.assert(changes.len == 1);
+std.debug.assert(changes[0].old_start == 1);
 ```
 <!-- END GENERATED -->
 
@@ -112,6 +143,22 @@ writes the `@@` lines, the heading a `Heading` finds (`Heading.c_function` is
 git's default rule), context taken from the new side as git prints it, and
 `\ No newline at end of file`.
 
+### Sequences and refinement
+
+`Interner(T, Context)` gives any type dense ids, with `Context` as std's hash maps
+take it, and `Differ.sequences` diffs two id sequences with every algorithm, the
+work cap, and the caller's anchors and indentation when it has them.
+
+`Differ.refine` takes one change of a line diff and cuts its old lines and its
+new lines into tokens: `words` (runs of letters, digits, `_` and bytes from
+0x80; runs of spaces, tabs and carriage returns; any other byte alone),
+`chars` (UTF-8 scalars, a byte that starts none on its own) or `bytes`. The
+whole runs are tokenized, not line by line, so a word that moved across a line
+break is found. The token ids are diffed and slid, and come back as byte spans,
+changed or not, that cover the change's lines and never cross a line end. A
+change with an empty side is one changed span per line. Tokens compare under the
+options' `Compare`, so case and whitespace can be overlooked inside a line too.
+
 ### Merge styles and levels
 
 | `Level` | git | |
@@ -132,6 +179,8 @@ diff3 is capped at eager, as in git. `Resolve` is `markers`, `ours`, `theirs` or
 | `differ.lines(old, new, options)` | The line diff of two texts, as a `Diff` borrowing the inputs and the workspace |
 | `differ.sequences(old, new, options)` | The diff of two sequences of ids below `options.classes` |
 | `differ.merge(base, ours, theirs, options)` | The three-way merge, as regions |
+| `differ.refine(diff, change, options)` | The changed and unchanged spans inside one change |
+| `Interner(T, Context)` | Dense ids for any type: `intern`, `internSlice`, `classes`, `get`, `clear` |
 | `diffLines(gpa, old, new, options)` | A one-shot diff that owns its memory |
 | `diff.stat()`, `diff.ratio()` | Lines added and removed; the matched share of both sides |
 | `diff.ops()`, `diff.hunks(options)` | The script as steps, and as hunks; neither allocates |
@@ -173,9 +222,11 @@ byte.
 
 Properties run on seeded inputs in every `zig build test`, and under the fuzzer
 with `zig build test --fuzz`: every script applies, under every algorithm,
-comparison and work cap; a minimal script is never longer; lines of one form
-always match; a merge's regions cover our side in order, an unchanged side gives
-the other, and the markers read back give each side's resolution. A warm
+comparison and work cap, for lines and for id sequences; a minimal script is
+never longer; lines of one form always match; refined spans tile every changed
+line and the unchanged ones read the same on both sides; a merge's regions cover
+our side in order, an unchanged side gives the other, and the markers read back
+give each side's resolution. A warm
 workspace is counted to make no allocation, every allocation failure is survived
 without a leak, the adversarial workloads are held to recorded work units and
 scripts, and the deep inputs run on a 64 KiB stack.
@@ -183,8 +234,9 @@ scripts, and the deep inputs run on a 64 KiB stack.
 `zig build bench -- [--smoke] [--json] [--runs N] [--only W1,W5]` times parallax's
 own workloads in ReleaseFast: large files with few and many edits, the
 adversarial shapes, many small diffs through one workspace with their latency and
-allocations, the whitespace flags, and merges with many conflicts, each beside
-the code parallax replaces. CI compiles the benchmarks and never times them.
+allocations, the whitespace flags, merges with many conflicts, each beside the
+code parallax replaces, and the refinement of every replaced line. CI compiles
+the benchmarks and never times them.
 
 ## Licence
 

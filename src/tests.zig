@@ -4,4 +4,5 @@ test {
     _ = @import("testing/moved_test.zig");
     _ = @import("testing/property_test.zig");
     _ = @import("testing/bounds_test.zig");
+    _ = @import("testing/refine_test.zig");
 }

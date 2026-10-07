@@ -24,6 +24,13 @@
       "imports": [
         "parallax"
       ]
+    },
+    "zig build docs -- refine": {
+      "source": "examples/usage.zig",
+      "region": "refine",
+      "imports": [
+        "parallax"
+      ]
     }
   },
   "ziglint_exceptions": "ci/ziglint-exceptions.json",

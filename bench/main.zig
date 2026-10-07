@@ -13,6 +13,7 @@
 //! - W6: W2 at 10% under -w, -b and --ignore-cr-at-eol (CRLF copies);
 //! - W7b: a conflict per ten lines, every style; W7c: many insertions at
 //!   the same places.
+//! - W8: every replace of W2 at 10% refined by words and by characters.
 //!
 //! Timings are wall-clock on this machine; CI only compiles this file.
 const std = @import("std");
@@ -152,6 +153,7 @@ pub fn main(init: std.process.Init) !void {
     if (config.wants("W5")) try small(r, gpa, config);
     if (config.wants("W6")) try whitespace(r, gpa, &d, config, large);
     if (config.wants("W7")) try merges(r, gpa, &d, config);
+    if (config.wants("W8")) try inline_(r, gpa, &d, config, large);
 }
 
 /// One pair under each algorithm, parallax then the baseline.
@@ -292,6 +294,37 @@ fn crlf(gpa: Allocator, text: []const u8) ![]u8 {
         try out.append(gpa, c);
     }
     return out.toOwnedSlice(gpa);
+}
+
+/// W8: every replace of W2 at 10% refined by words and by characters.
+fn inline_(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines: usize) !void {
+    const p = try gen.w2(gpa, lines, 0.1);
+    defer p.deinit(gpa);
+    var e: parallax.Differ = .init(gpa);
+    defer e.deinit();
+    const diff = try e.lines(p.old, p.new, .{});
+    var replaces: usize = 0;
+    var bytes: usize = 0;
+    for (diff.changes) |c| if (c.old_len != 0 and c.new_len != 0) {
+        replaces += 1;
+        bytes += diff.old.span(c.old_start, c.old_len).len + diff.new.span(c.new_start, c.new_len).len;
+    };
+    for ([_]parallax.Tokens{ .words, .chars }) |tokens| {
+        var best: f64 = std.math.inf(f64);
+        for (0..config.runs + 1) |run| {
+            const t0 = r.now();
+            for (diff.changes) |c| if (c.old_len != 0 and c.new_len != 0) {
+                const refined = try d.refine(diff, c, .{ .tokens = tokens });
+                std.mem.doNotOptimizeAway(refined.old.len);
+            };
+            const t1 = r.now();
+            if (run != 0) best = @min(best, ns(t0, t1));
+        }
+        var label_buf: [32]u8 = undefined;
+        const label = try std.fmt.bufPrint(&label_buf, "{t}", .{tokens});
+        try r.line("W8", label, "per change", best / @as(f64, @floatFromInt(@max(replaces, 1))) / 1e3, "us");
+        try r.line("W8", label, "throughput", @as(f64, @floatFromInt(bytes)) / 1e6 / (best / 1e9), "MB/s");
+    }
 }
 
 /// W7: merges, parallax writing into a discarding writer, against the
