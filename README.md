@@ -319,7 +319,7 @@ hunk. diff-match-patch 20241021 is the reference for the cleanups: its diffs of
 609 text pairs, cleaned up by parallax's passes, must come out as its own
 semantic and efficiency cleanups leave them.
 
-Properties run through shakedown on 20,500 seeded cases in every `zig build test`,
+Properties run through shakedown on 23,400 seeded cases in every `zig build test`,
 with failures shrunk and printed as replayable tapes. Select a property with
 `-Dtest-filter` and set `SHAKEDOWN_TAPE` to replay it, or `SHAKEDOWN_SEED` to
 choose another seed. The same properties run under the fuzzer

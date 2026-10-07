@@ -1,6 +1,7 @@
 //! A text split into lines without copying it: the end offset of each line.
 
 const std = @import("std");
+const shakedown = @import("shakedown");
 const Allocator = std.mem.Allocator;
 
 /// A text split at '\n'. Line i is `text[start(i)..ends[i]]`, newline
@@ -77,23 +78,27 @@ fn splitBlocks(gpa: Allocator, ends: *std.ArrayList(u32), text: []const u8) Allo
 
 test "the block and scalar line splits agree" {
     const gpa = std.testing.allocator;
-    var prng: std.Random.DefaultPrng = .init(0x73706c69);
-    const r = prng.random();
-    var text: [700]u8 = undefined;
     var a: std.ArrayList(u32) = .empty;
     defer a.deinit(gpa);
     var b: std.ArrayList(u32) = .empty;
     defer b.deinit(gpa);
-    for (0..500) |_| {
-        const n = r.uintLessThan(usize, text.len + 1);
-        const odds = 1 + r.uintLessThan(u8, 80);
-        for (text[0..n]) |*c| c.* = if (r.uintLessThan(u8, odds) == 0) '\n' else 'x';
-        a.clearRetainingCapacity();
-        b.clearRetainingCapacity();
-        try split(gpa, &a, text[0..n]);
-        try splitScalar(gpa, &b, text[0..n], 0);
-        try std.testing.expectEqualSlices(u32, b.items, a.items);
-    }
+    const Buffers = struct { a: *std.ArrayList(u32), b: *std.ArrayList(u32) };
+    const buffers: Buffers = .{ .a = &a, .b = &b };
+    try shakedown.check(gpa, buffers, struct {
+        fn run(ctx: Buffers, case: *shakedown.Case) !void {
+            const gen = shakedown.gen;
+            const source = case.source;
+            var text: [700]u8 = undefined;
+            const n = gen.intRange(source, usize, 0, text.len);
+            const odds = gen.intRange(source, u8, 1, 80);
+            for (text[0..n]) |*c| c.* = if (gen.weighted(source, &.{ 1, odds - 1 }) == 0) '\n' else 'x';
+            ctx.a.clearRetainingCapacity();
+            ctx.b.clearRetainingCapacity();
+            try split(std.testing.allocator, ctx.a, text[0..n]);
+            try splitScalar(std.testing.allocator, ctx.b, text[0..n], 0);
+            try std.testing.expectEqualSlices(u32, ctx.b.items, ctx.a.items);
+        }
+    }.run, .{ .seed = 0x73706c69, .cases = 500 });
 }
 
 test "split keeps the newline and keeps a last line without one" {
@@ -164,19 +169,21 @@ fn commonSuffixVector(a: []const u8, b: []const u8, limit: usize) usize {
 }
 
 test "the vector and scalar byte scans agree" {
-    var prng: std.Random.DefaultPrng = .init(0x7363616e);
-    const r = prng.random();
-    var a: [200]u8 = undefined;
-    var b: [200]u8 = undefined;
-    for (0..2000) |_| {
-        const na = r.uintLessThan(usize, a.len + 1);
-        const nb = r.uintLessThan(usize, b.len + 1);
-        for (a[0..na]) |*c| c.* = 'a' + r.uintLessThan(u8, 2);
-        @memcpy(b[0..@min(na, nb)], a[0..@min(na, nb)]);
-        for (b[@min(na, nb)..nb]) |*c| c.* = 'a';
-        if (nb > 0 and r.boolean()) b[r.uintLessThan(usize, nb)] = 'c';
-        const limit = r.uintLessThan(usize, 210);
-        try std.testing.expectEqual(commonPrefixScalar(a[0..na], b[0..nb]), commonPrefixVector(a[0..na], b[0..nb]));
-        try std.testing.expectEqual(commonSuffixScalar(a[0..na], b[0..nb], limit), commonSuffixVector(a[0..na], b[0..nb], limit));
-    }
+    try shakedown.check(std.testing.allocator, {}, struct {
+        fn run(_: void, case: *shakedown.Case) !void {
+            const gen = shakedown.gen;
+            const source = case.source;
+            var a: [200]u8 = undefined;
+            var b: [200]u8 = undefined;
+            const na = gen.intRange(source, usize, 0, a.len);
+            const nb = gen.intRange(source, usize, 0, b.len);
+            for (a[0..na]) |*c| c.* = gen.oneOf(source, u8, &.{ 'a', 'b' });
+            @memcpy(b[0..@min(na, nb)], a[0..@min(na, nb)]);
+            for (b[@min(na, nb)..nb]) |*c| c.* = 'a';
+            if (nb > 0 and gen.boolean(source)) b[gen.intRange(source, usize, 0, nb - 1)] = 'c';
+            const limit = gen.intRange(source, usize, 0, 209);
+            try std.testing.expectEqual(commonPrefixScalar(a[0..na], b[0..nb]), commonPrefixVector(a[0..na], b[0..nb]));
+            try std.testing.expectEqual(commonSuffixScalar(a[0..na], b[0..nb], limit), commonSuffixVector(a[0..na], b[0..nb], limit));
+        }
+    }.run, .{ .seed = 0x7363616e, .cases = 2000 });
 }

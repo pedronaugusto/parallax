@@ -613,19 +613,22 @@ fn Search(comptime Int: type) type {
 }
 
 test "the windowed counts set aside what the direct scan does" {
-    var prng: std.Random.DefaultPrng = .init(0x77696e64);
-    const r = prng.random();
-    var dis: [600]u8 = undefined;
-    var runs: [600]u16 = undefined;
-    for (0..400) |_| {
-        const n = 1 + r.uintLessThan(usize, dis.len);
-        const ones = r.uintLessThan(u8, 40);
-        for (dis[0..n]) |*d| d.* = if (r.uintLessThan(u8, 100) < ones) 1 else if (r.boolean()) 0 else 2;
-        markDiscardable(dis[0..n], runs[0..n]);
-        for (0..n) |i| {
-            if (dis[i] != 2) continue;
-            const direct = inDiscardableRun(dis[0..n], @intCast(i), 0, @intCast(n - 1));
-            try std.testing.expectEqual(direct, runs[i] & discard != 0);
+    const shakedown = @import("shakedown");
+    try shakedown.check(std.testing.allocator, {}, struct {
+        fn run(_: void, case: *shakedown.Case) !void {
+            const gen = shakedown.gen;
+            const source = case.source;
+            var dis: [600]u8 = undefined;
+            var runs: [600]u16 = undefined;
+            const n = gen.intRange(source, usize, 1, dis.len);
+            const ones = gen.intRange(source, u8, 0, 39);
+            for (dis[0..n]) |*d| d.* = if (gen.intRange(source, u8, 0, 99) < ones) 1 else if (gen.boolean(source)) 0 else 2;
+            markDiscardable(dis[0..n], runs[0..n]);
+            for (0..n) |i| {
+                if (dis[i] != 2) continue;
+                const direct = inDiscardableRun(dis[0..n], @intCast(i), 0, @intCast(n - 1));
+                try std.testing.expectEqual(direct, runs[i] & discard != 0);
+            }
         }
-    }
+    }.run, .{ .seed = 0x77696e64, .cases = 400 });
 }
