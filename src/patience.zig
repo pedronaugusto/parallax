@@ -15,6 +15,7 @@ const assert = std.debug.assert;
 const Flags = @import("flags.zig").Flags;
 const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
+const fit = @import("fit.zig");
 
 pub const Buffers = struct {
     slots: std.ArrayList(Slot) = .empty,
@@ -22,12 +23,12 @@ pub const Buffers = struct {
     tops: std.ArrayList(u32) = .empty,
     backbone: std.ArrayList(u32) = .empty,
     todo: std.ArrayList(Region) = .empty,
-    /// Per id: its slot in the current region, valid where `stamp` holds the
-    /// generation.
+    /// Per id: its slot in the current region, or `absent`; each region
+    /// clears the entries of its own ids first.
     slot_of: std.ArrayList(u32) = .empty,
-    stamp: std.ArrayList(u32) = .empty,
-    generation: u32 = 0,
 };
+
+const absent = std.math.maxInt(u32);
 
 /// Count lines from line1 of the old side against count2 from line2 of the
 /// new, zero-based.
@@ -62,12 +63,7 @@ pub fn diff(
     fb: Flags,
 ) Allocator.Error!void {
     const gpa = c.gpa;
-    const old = p.stamp.items.len;
-    if (old < c.classes) {
-        try p.stamp.resize(gpa, c.classes);
-        @memset(p.stamp.items[old..], 0);
-        try p.slot_of.resize(gpa, c.classes);
-    }
+    if (p.slot_of.items.len < c.classes) try fit.resize(gpa, &p.slot_of, c.classes);
     var s: State(Anchor) = .{ .anchor = anchor, .c = c, .p = p, .a = a, .b = b, .fa = fa, .fb = fb };
     p.todo.clearRetainingCapacity();
     try p.todo.append(gpa, .{ .line1 = 0, .count1 = @intCast(a.len), .line2 = 0, .count2 = @intCast(b.len) });
@@ -104,26 +100,20 @@ fn State(comptime Anchor: type) type {
             const p = s.p;
             const gpa = s.c.gpa;
 
-            if (p.generation == std.math.maxInt(u32)) {
-                @memset(p.stamp.items, 0);
-                p.generation = 0;
-            }
-            p.generation += 1;
-            const gen = p.generation;
-            const stamp = p.stamp.items;
             const slot_of = p.slot_of.items;
+            for (s.a[r.line1..][0..r.count1]) |id| slot_of[id] = absent;
+            for (s.b[r.line2..][0..r.count2]) |id| slot_of[id] = absent;
 
             // Every distinct line of the old side, in the order it first
             // appears, which is the order the backbone is built in.
             p.slots.clearRetainingCapacity();
-            try p.slots.ensureTotalCapacity(gpa, r.count1);
+            try p.slots.ensureTotalCapacityPrecise(gpa, r.count1);
             for (r.line1..r.line1 + r.count1) |i| {
                 const id = s.a[i];
-                if (stamp[id] == gen) {
+                if (slot_of[id] != absent) {
                     p.slots.items[slot_of[id]].line2 = Slot.repeated;
                     continue;
                 }
-                stamp[id] = gen;
                 slot_of[id] = @intCast(p.slots.items.len);
                 p.slots.appendAssumeCapacity(.{ .line1 = @intCast(i), .anchor = s.anchor.at(@intCast(i)) });
             }
@@ -131,7 +121,7 @@ fn State(comptime Anchor: type) type {
             var has_matches = false;
             for (r.line2..r.line2 + r.count2) |j| {
                 const id = s.b[j];
-                if (stamp[id] != gen) continue;
+                if (slot_of[id] == absent) continue;
                 has_matches = true;
                 const slot = &p.slots.items[slot_of[id]];
                 slot.line2 = if (slot.line2 == Slot.none) @intCast(j) else Slot.repeated;
@@ -157,11 +147,11 @@ fn State(comptime Anchor: type) type {
         fn longestCommon(s: *Self) Allocator.Error![]const u32 {
             const p = s.p;
             const slots = p.slots.items;
-            try p.piles.resize(s.c.gpa, slots.len);
+            try fit.resize(s.c.gpa, &p.piles, slots.len);
             const piles = p.piles.items;
             // The new-side line on top of each pile, beside the piles, so
             // the search reads one array.
-            try p.tops.resize(s.c.gpa, slots.len);
+            try fit.resize(s.c.gpa, &p.tops, slots.len);
             const tops = p.tops.items;
             var longest: usize = 0;
             // No pile at or below this one may be replaced.
@@ -193,7 +183,7 @@ fn State(comptime Anchor: type) type {
                 }
             }
 
-            try p.backbone.resize(s.c.gpa, longest);
+            try fit.resize(s.c.gpa, &p.backbone, longest);
             const out = p.backbone.items;
             if (longest == 0) return out;
             var cursor = piles[longest - 1];

@@ -6,6 +6,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Flags = @import("flags.zig").Flags;
+const fit = @import("fit.zig");
 const change = @import("change.zig");
 const Change = change.Change;
 const Algorithm = change.Algorithm;
@@ -45,8 +46,8 @@ pub fn diff(
     run: Run,
     out: *std.ArrayList(Change),
 ) Allocator.Error!u64 {
-    try bufs.flags_a.resize(gpa, a.len + 2);
-    try bufs.flags_b.resize(gpa, b.len + 2);
+    try fit.resize(gpa, &bufs.flags_a, a.len + 2);
+    try fit.resize(gpa, &bufs.flags_b, b.len + 2);
     const fa: Flags = .whole(bufs.flags_a.items, @intCast(a.len));
     const fb: Flags = .whole(bufs.flags_b.items, @intCast(b.len));
     var c: myers.Context = .{
@@ -57,7 +58,6 @@ pub fn diff(
         .stop = run.stop,
         .buffers = &bufs.myers,
     };
-    try c.prepare();
 
     switch (run.algorithm) {
         .myers => try myers.whole(&c, a, b, fa, fb),

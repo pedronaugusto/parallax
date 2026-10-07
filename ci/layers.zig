@@ -3,6 +3,7 @@ const gantry = @import("gantry");
 
 pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "comparison, lines and flags", .patterns = &.{
+        "src/fit.zig",
         "src/compare.zig",
         "src/lines.zig",
         "src/flags.zig",
@@ -86,6 +87,7 @@ pub const references: []const gantry.rules.ReferenceRule = &.{
 };
 
 pub const required = [_][]const u8{
+    "src/fit.zig",
     "src/compare.zig",
     "src/lines.zig",
     "src/flags.zig",

@@ -16,6 +16,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const Flags = @import("flags.zig").Flags;
+const fit = @import("fit.zig");
 
 /// Below this edit cost the search never gives up, however small the input.
 const max_cost_min: u64 = 256;
@@ -54,12 +55,9 @@ pub const Buffers = struct {
     kvd32: std.ArrayList(i32) = .empty,
     kvd64: std.ArrayList(i64) = .empty,
     stack: std.ArrayList(Box) = .empty,
-    /// Occurrences of each id in the two regions, valid where `stamp`
-    /// holds the current generation.
-    count_a: std.ArrayList(u32) = .empty,
-    count_b: std.ArrayList(u32) = .empty,
-    stamp: std.ArrayList(u32) = .empty,
-    generation: u32 = 0,
+    /// Per id, its occurrences in the two regions, up to 65535 each: in
+    /// the old one in the low half, in the new one in the high half.
+    counts: std.ArrayList(u32) = .empty,
 };
 
 /// One box still to split: lines `off1 .. lim1` against `off2 .. lim2` of
@@ -101,28 +99,6 @@ pub const Context = struct {
         @branchHint(.cold);
         return (c.max_work != 0 and c.work >= c.max_work) or c.stopped();
     }
-
-    /// Make the id-indexed arrays fit `classes`. Called once per diff.
-    pub fn prepare(c: *Context) Allocator.Error!void {
-        const b = c.buffers;
-        const old = b.stamp.items.len;
-        if (old < c.classes) {
-            try b.stamp.resize(c.gpa, c.classes);
-            @memset(b.stamp.items[old..], 0);
-            try b.count_a.resize(c.gpa, c.classes);
-            try b.count_b.resize(c.gpa, c.classes);
-        }
-    }
-
-    fn nextGeneration(c: *Context) u32 {
-        const b = c.buffers;
-        if (b.generation == std.math.maxInt(u32)) {
-            @memset(b.stamp.items, 0);
-            b.generation = 0;
-        }
-        b.generation += 1;
-        return b.generation;
-    }
 };
 
 /// Mark the changed lines of two whole files, the way git's `xdl_do_diff`
@@ -142,34 +118,18 @@ pub fn whole(c: *Context, a: []const u32, b: []const u32, fa: Flags, fb: Flags) 
     }
 
     // Each line's count in each whole file, before the trim, as git counts
-    // them: the counts change the answer.
-    const gen = c.nextGeneration();
-    const stamp = bufs.stamp.items;
-    const count_a = bufs.count_a.items;
-    const count_b = bufs.count_b.items;
-    for (a) |id| {
-        if (stamp[id] != gen) {
-            stamp[id] = gen;
-            count_a[id] = 0;
-            count_b[id] = 0;
-        }
-        count_a[id] += 1;
-    }
-    for (b) |id| {
-        if (stamp[id] != gen) {
-            stamp[id] = gen;
-            count_a[id] = 0;
-            count_b[id] = 0;
-        }
-        count_b[id] += 1;
-    }
+    // them: the counts change the answer. Only whether a count is zero and
+    // whether it reaches `max_eqlimit` matter, so they stop at 65535.
+    if (bufs.counts.items.len < c.classes) try fit.resize(c.gpa, &bufs.counts, c.classes);
+    const counts = bufs.counts.items;
+    countLines(counts, a, b);
 
-    try select(c, &bufs.index_a, a, count_b, gen, start, end_a, fa);
-    try select(c, &bufs.index_b, b, count_a, gen, start, end_b, fb);
+    try select(c, &bufs.index_a, a, counts, 16, start, end_a, fa);
+    try select(c, &bufs.index_b, b, counts, 0, start, end_b, fb);
     const index_a = bufs.index_a.items;
     const index_b = bufs.index_b.items;
-    try bufs.packed_a.resize(c.gpa, index_a.len);
-    try bufs.packed_b.resize(c.gpa, index_b.len);
+    try fit.resize(c.gpa, &bufs.packed_a, index_a.len);
+    try fit.resize(c.gpa, &bufs.packed_b, index_b.len);
     for (index_a, bufs.packed_a.items) |at, *id| id.* = a[at];
     for (index_b, bufs.packed_b.items) |at, *id| id.* = b[at];
 
@@ -183,9 +143,22 @@ pub fn whole(c: *Context, a: []const u32, b: []const u32, fa: Flags, fb: Flags) 
     }
 }
 
-fn run(comptime Int: type, c: *Context, kvd: *std.ArrayList(Int), ndiags: u64, fa: Flags, fb: Flags) Allocator.Error!void {
+/// Each id's lines in `a` in the low half of its count, in `b` in the high
+/// half, each stopping at 65535.
+fn countLines(counts: []u32, a: []const u32, b: []const u32) void {
+    for (a) |id| counts[id] = 0;
+    for (b) |id| counts[id] = 0;
+    for (a) |id| {
+        if (counts[id] & 0xffff != 0xffff) counts[id] += 1;
+    }
+    for (b) |id| {
+        if (counts[id] >> 16 != 0xffff) counts[id] += 1 << 16;
+    }
+}
+
+noinline fn run(comptime Int: type, c: *Context, kvd: *std.ArrayList(Int), ndiags: u64, fa: Flags, fb: Flags) Allocator.Error!void {
     const bufs = c.buffers;
-    try kvd.resize(c.gpa, @intCast(2 * ndiags));
+    try fit.resize(c.gpa, kvd, @intCast(2 * ndiags));
     const n: usize = @intCast(ndiags);
     var search: Search(Int) = .{
         .a = bufs.packed_a.items,
@@ -206,37 +179,36 @@ fn run(comptime Int: type, c: *Context, kvd: *std.ArrayList(Int), ndiags: u64, f
 /// The lines of `ids[start..end]` the search should see, as indices into
 /// `ids`, in `out`. Everything else is marked changed here and never
 /// reconsidered. A minimal diff keeps every line that has a counterpart,
-/// however common.
+/// however common. The other side's count of each id is the half of
+/// `counts` at `other`.
 fn select(
     c: *Context,
     out: *std.ArrayList(u32),
     ids: []const u32,
-    counts_other: []const u32,
-    gen: u32,
+    counts: []const u32,
+    other: u5,
     start: usize,
     end: usize,
     changed: Flags,
 ) Allocator.Error!void {
     out.clearRetainingCapacity();
     if (start >= end) return;
-    const stamp = c.buffers.stamp.items;
     // 0: no counterpart at all. 1: worth matching. 2: so common that a
     // match says little.
-    try c.buffers.dis.resize(c.gpa, end - start);
+    try fit.resize(c.gpa, &c.buffers.dis, end - start);
     const dis = c.buffers.dis.items;
     const limit = @min(bogosqrt(ids.len), max_eqlimit);
     var any_common = false;
     for (start..end) |i| {
-        const id = ids[i];
-        const nm: u64 = if (stamp[id] == gen) counts_other[id] else 0;
+        const nm: u64 = (counts[ids[i]] >> other) & 0xffff;
         dis[i - start] = if (nm == 0) 0 else if (nm >= limit and !c.minimal) 2 else 1;
         any_common = any_common or dis[i - start] == 2;
     }
     if (any_common) {
-        try c.buffers.runs.resize(c.gpa, end - start);
+        try fit.resize(c.gpa, &c.buffers.runs, end - start);
         markDiscardable(dis, c.buffers.runs.items);
     }
-    try out.ensureTotalCapacity(c.gpa, end - start);
+    try out.ensureTotalCapacityPrecise(c.gpa, end - start);
     for (start..end) |i| {
         const keep = switch (dis[i - start]) {
             1 => true,

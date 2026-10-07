@@ -14,6 +14,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Flags = @import("flags.zig").Flags;
 const myers = @import("myers.zig");
+const fit = @import("fit.zig");
 
 /// Lines occurring more often than this in a region anchor nothing.
 const max_chain: u32 = 64;
@@ -36,10 +37,10 @@ pub fn diff(c: *myers.Context, h: *Buffers, a: []const u32, b: []const u32, fa: 
     const gpa = c.gpa;
     const old = h.stamp.items.len;
     if (old < c.classes) {
-        try h.stamp.resize(gpa, c.classes);
+        try fit.resize(gpa, &h.stamp, c.classes);
         @memset(h.stamp.items[old..], 0);
-        try h.rec_ptr.resize(gpa, c.classes);
-        try h.rec_cnt.resize(gpa, c.classes);
+        try fit.resize(gpa, &h.rec_ptr, c.classes);
+        try fit.resize(gpa, &h.rec_cnt, c.classes);
     }
     var s: State = .{ .c = c, .h = h, .a = a, .b = b, .fa = fa, .fb = fb };
     h.stack.clearRetainingCapacity();
@@ -122,7 +123,7 @@ const State = struct {
         // Every occurrence of a value chains to the next one down the file,
         // and the value's record starts at its first. Scanning from the end
         // leaves the chains in that order.
-        try h.next.resize(s.c.gpa, @intCast(count1));
+        try fit.resize(s.c.gpa, &h.next, @intCast(count1));
         const next = h.next.items;
         var ptr = end1;
         while (ptr >= line1) : (ptr -= 1) {

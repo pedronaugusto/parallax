@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const compare_mod = @import("compare.zig");
+const fit = @import("fit.zig");
 const Compare = compare_mod.Compare;
 const Lines = @import("lines.zig").Lines;
 
@@ -49,7 +50,7 @@ pub const Table = struct {
         t.classes = 0;
         t.first.clearRetainingCapacity();
         const want = std.math.ceilPowerOfTwoAssert(usize, @max(64, lines / 3 * 2));
-        try t.slots.resize(gpa, want);
+        try fit.resize(gpa, &t.slots, want);
         @memset(t.slots.items, 0);
     }
 
@@ -82,7 +83,7 @@ pub const Table = struct {
     /// Room for `n` more forms with the table at most three quarters full.
     fn reserve(t: *Table, gpa: Allocator, n: u32) Allocator.Error!void {
         while ((@as(u64, t.classes) + n) * 4 > t.slots.items.len * 3) try t.grow(gpa);
-        try t.first.ensureUnusedCapacity(gpa, n);
+        if (t.first.capacity < t.first.items.len + n) try t.first.ensureTotalCapacityPrecise(gpa, @max(t.first.items.len + n, t.slots.items.len / 4 * 3));
     }
 
     /// The id of `line`, global index `global`, whose hash is `h`. Room for
@@ -112,7 +113,7 @@ pub const Table = struct {
         const old_len = t.slots.items.len;
         // Room for the doubled table after the live slots, then fold the
         // live ones back into it, each in the slot its tag picks.
-        try t.slots.resize(gpa, old_len * 3);
+        try fit.resize(gpa, &t.slots, old_len * 3);
         const live = t.slots.items[0..old_len];
         const moved = t.slots.items[old_len * 2 ..][0..old_len];
         @memcpy(moved, live);

@@ -14,6 +14,7 @@ const Compare = compare_mod.Compare;
 const lines_mod = @import("lines.zig");
 const Lines = lines_mod.Lines;
 const table_mod = @import("table.zig");
+const fit = @import("fit.zig");
 const change_mod = @import("change.zig");
 const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
@@ -138,15 +139,15 @@ fn eachList(d: *Differ, context: anytype, comptime f: anytype) void {
     const c = &d.scratch;
     const m = &d.merge_buffers;
     inline for (.{
-        &c.myers.index_a,     &c.myers.index_b,     &c.myers.packed_a,    &c.myers.packed_b,
-        &c.myers.dis,         &c.myers.runs,        &c.myers.kvd32,       &c.myers.kvd64,
-        &c.myers.stack,       &c.myers.count_a,     &c.myers.count_b,     &c.myers.stamp,
-        &c.histogram.next,    &c.histogram.rec_ptr, &c.histogram.rec_cnt, &c.histogram.stamp,
-        &c.histogram.stack,   &c.patience.slots,    &c.patience.piles,    &c.patience.tops,
-        &c.patience.backbone, &c.patience.todo,     &c.patience.slot_of,  &c.patience.stamp,
-        &c.flags_a,           &c.flags_b,           &d.ends[0],           &d.ends[1],
-        &d.ends[2],           &d.ids,               &d.changes,           &d.changes_theirs,
-        &m.hunks,             &m.same,              &m.regions,           &m.refine,
+        &c.myers.index_a,     &c.myers.index_b,   &c.myers.packed_a,    &c.myers.packed_b,
+        &c.myers.dis,         &c.myers.runs,      &c.myers.kvd32,       &c.myers.kvd64,
+        &c.myers.stack,       &c.myers.counts,    &c.histogram.next,    &c.histogram.rec_ptr,
+        &c.histogram.rec_cnt, &c.histogram.stamp, &c.histogram.stack,   &c.patience.slots,
+        &c.patience.piles,    &c.patience.tops,   &c.patience.backbone, &c.patience.todo,
+        &c.patience.slot_of,  &c.flags_a,         &c.flags_b,           &d.ends[0],
+        &d.ends[1],           &d.ends[2],         &d.ids,               &d.changes,
+        &d.changes_theirs,    &m.hunks,           &m.same,              &m.regions,
+        &m.refine,
     }) |list| f(context, list);
 }
 
@@ -172,7 +173,7 @@ fn internAll(d: *Differ, texts: *const table_mod.Texts, compare: Compare) Alloca
     var total: usize = 0;
     for (texts.sides[0..texts.count]) |s| total += s.len();
     try d.table.reset(d.gpa, total);
-    try d.ids.resize(d.gpa, total);
+    try fit.resize(d.gpa, &d.ids, total);
     const ids = d.ids.items;
 
     if (texts.count != 2) {
