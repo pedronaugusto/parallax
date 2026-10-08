@@ -1,5 +1,7 @@
 # parallax
 
+Work in progress; the release validation is still pending.
+
 parallax is a line diff and a three-way line merge in Zig. Its output is git's,
 byte for byte: the same edit scripts under Myers, minimal, patience, anchored and
 histogram, the same hunks and unified body, and the same merged text in the

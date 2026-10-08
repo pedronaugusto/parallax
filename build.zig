@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
     // Keep configuring on the initial fetch pass so preflight declares
     // every -D option before Zig validates it.
     const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize }) catch null;
-    if (shakedown) |dependency| tests.root_module.addImport("shakedown", shakedownModule(b, dependency, target, optimize));
+    if (shakedown) |dependency| tests.root_module.addImport("shakedown", dependency.module("shakedown"));
     // The references' output, captured once, as data: git's, GNU patch's
     // and diff-match-patch's.
     for ([_][]const u8{
@@ -120,15 +120,24 @@ pub fn build(b: *std.Build) void {
         // A project that depends on parallax by path, with no packages to
         // fetch: the build a consumer gets.
         preflight.addConsumerCheck(b, .{ .package = "parallax", .program = b.path("ci/consumer.zig") });
-        const planner = b.dependencyLazy("preflight", .{ .@"repo-root" = "." }) catch return;
-        // Its artifact exists after the planner's own lazy tools are fetched.
-        if (b.graph.needed_lazy_dependencies.count() != 0) return;
-        const plan = b.addSystemCommand(&.{"python3"});
-        plan.addFileArg(b.path("ci/plan.py"));
-        plan.addArtifactArg(planner.artifact("preflight"));
-        plan.setCwd(b.path("."));
-        plan.has_side_effects = true;
-        b.step("plan", "Regenerate .github/workflows/ci.yml from the pinned preflight planner").dependOn(&plan.step);
+        const tooling = b.dependencyLazy("preflight", .{}) catch return;
+        const host = b.graph.host;
+        const gantry = tooling.builder.dependencyLazy("gantry", .{ .target = host, .optimize = .safe }) catch return;
+        const plan_tool = b.addExecutable(.{
+            .name = "parallax-ci-plan",
+            .root_module = b.createModule(.{
+                .root_source_file = tooling.path("src/main.zig"),
+                .target = host,
+                .optimize = .safe,
+                .imports = &.{.{ .name = "gantry", .module = gantry.module("gantry") }},
+            }),
+        });
+        const planner = b.addRunArtifact(plan_tool);
+        planner.addArg("plan");
+        planner.addPassthruArgs();
+        planner.setCwd(b.path("."));
+        planner.has_side_effects = true;
+        b.step("plan", "Generate the hosted CI matrices from pinned preflight").dependOn(&planner.step);
     } else {
         // Zig validates options even on the pass that discovers preflight.
         _ = b.option(bool, "ci-lint", "Run source checks before CI tests");
@@ -144,34 +153,4 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
         .name = "parallax",
         .module = b.createModule(.{ .root_source_file = b.path("src/parallax.zig"), .target = target, .optimize = optimize }),
     }}) catch @panic("out of memory");
-}
-
-// shakedown 1bb13e7 indexes three arrays with u64 choices, which Zig
-// cannot implicitly narrow on 32-bit targets. Keep the pin and all its
-// behavior; only add checked casts in a generated copy, never the package
-// cache. Each index is bounded by the corresponding array's length.
-fn shakedownModule(b: *std.Build, dependency: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
-    const files = b.addWriteFiles();
-    _ = files.addCopyDirectory(dependency.path("src"), "src", .{ .exclude_extensions = &.{ "Source.zig", "gen.zig" } });
-    _ = files.add("src/Source.zig", patched(b, dependency, "src/Source.zig", &.{
-        .{ .before = "widths[count - 1]", .after = "widths[@intCast(count - 1)]" },
-    }));
-    _ = files.add("src/gen.zig", patched(b, dependency, "src/gen.zig", &.{
-        .{ .before = "values[s.below(values.len - 1)]", .after = "values[@intCast(s.below(values.len - 1))]" },
-        .{ .before = "items[s.below(items.len - 1)]", .after = "items[@intCast(s.below(items.len - 1))]" },
-    }));
-    return b.createModule(.{ .root_source_file = files.getDirectory().path(b, "src/shakedown.zig"), .target = target, .optimize = optimize });
-}
-
-const Patch = struct { before: []const u8, after: []const u8 };
-
-fn patched(b: *std.Build, dependency: *std.Build.Dependency, name: []const u8, patches: []const Patch) []const u8 {
-    b.dependOnFileContents(dependency.path(name));
-    const path = dependency.builder.root.join(b.allocator, name) catch @panic("out of memory");
-    var bytes: []const u8 = path.root_dir.handle.readFileAlloc(b.graph.io, path.sub_path, b.allocator, .unlimited) catch @panic("cannot read pinned shakedown source");
-    for (patches) |patch| {
-        if (std.mem.count(u8, bytes, patch.before) != 1) @panic("pinned shakedown compatibility patch no longer matches");
-        bytes = std.mem.replaceOwned(u8, b.allocator, bytes, patch.before, patch.after) catch @panic("out of memory");
-    }
-    return bytes;
 }
