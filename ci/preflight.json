@@ -8,6 +8,9 @@
   "test_support": [
     "src/testing/**"
   ],
+  "shipped": {
+    "docs": "Architecture linked by the packaged README for consumers of the library"
+  },
   "function_exceptions": {},
   "layout_exceptions": {},
   "docs": {

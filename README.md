@@ -122,6 +122,8 @@ std.debug.assert(results[0].applied.offset == 1);
 
 ## Design
 
+[Architecture](docs/design.md) records the layers, ownership and invariants.
+
 Every line becomes a dense `u32` id. The texts are split at `\n` without copying
 them; each line is hashed once while it is scanned, the comparison form under the
 whitespace flags streamed into the hash with no copy, and bytes are compared only
