@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Property tests use shakedown generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; allocation failure sweeps use its NoResize allocator and repeated fixtures use its corpus helpers.
 - Consume shakedown unchanged from its upstream module, including its 32-bit generator fixes.
-- Replace the Python planner with `zig build plan -- --tier <tier> --output <file>` using preflight's Zig matrix planner.
-- Pin preflight 9af905e and shakedown d5d19d3, keep test dependencies lazy, ship only the library sources and package documents, and smoke-run each benchmark program through preflight.
+- Regenerate the pinned workflow and every tier matrix with preflight's canonical `zig build plan -- --workflow .github/workflows/ci.yml`.
+- Pin preflight b28046c and shakedown 9357a9a, keep test dependencies lazy, ship only the library sources and package documents, and smoke-run each benchmark program through preflight.
 
 ### Added
 

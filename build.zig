@@ -120,24 +120,6 @@ pub fn build(b: *std.Build) void {
         // A project that depends on parallax by path, with no packages to
         // fetch: the build a consumer gets.
         preflight.addConsumerCheck(b, .{ .package = "parallax", .program = b.path("ci/consumer.zig") });
-        const tooling = b.dependencyLazy("preflight", .{}) catch return;
-        const host = b.graph.host;
-        const gantry = tooling.builder.dependencyLazy("gantry", .{ .target = host, .optimize = .safe }) catch return;
-        const plan_tool = b.addExecutable(.{
-            .name = "parallax-ci-plan",
-            .root_module = b.createModule(.{
-                .root_source_file = tooling.path("src/main.zig"),
-                .target = host,
-                .optimize = .safe,
-                .imports = &.{.{ .name = "gantry", .module = gantry.module("gantry") }},
-            }),
-        });
-        const planner = b.addRunArtifact(plan_tool);
-        planner.addArg("plan");
-        planner.addPassthruArgs();
-        planner.setCwd(b.path("."));
-        planner.has_side_effects = true;
-        b.step("plan", "Generate the hosted CI matrices from pinned preflight").dependOn(&planner.step);
     } else {
         // Zig validates options even on the pass that discovers preflight.
         _ = b.option(bool, "ci-lint", "Run source checks before CI tests");
