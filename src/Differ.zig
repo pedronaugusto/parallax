@@ -131,6 +131,7 @@ pub fn shrink(d: *Differ, keep: Bytes) void {
             sum.* = fit.add(sum.*, fit.bytes(list));
         }
     }.f);
+    // aegis: no-danger: docs/design.md#numeric-boundaries; both operands are Bytes; aegis has no typed ordering operation.
     if (total.raw() <= keep.raw()) return;
     d.eachList(d.gpa, struct {
         fn f(gpa: Allocator, list: anytype) void {
