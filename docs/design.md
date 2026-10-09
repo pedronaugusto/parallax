@@ -251,3 +251,12 @@ aegis and its existing algorithm layers. Internal storage, flags, changes and
 cleanup have one module owner and are not separately registered consumer
 modules. The source layer graph maps every named import and permits no upward
 edge; `check-consumer` proves shared identities while fetching only aegis.
+
+The package preflight configuration selects glint A004 as a gate for adopted
+IDs, units and checked integers. Its paths include production, test support,
+benchmarks, examples, CI drivers and the build script; no test or benchmark
+exemption applies. The pinned published preflight still executes ziglint, and
+the published glint aegis pack currently rejects gate selections. This
+configuration awaits the G4 runner/admission integration; current validation
+uses the published pack in report mode. The storage-sum site uses the pack
+comment syntax with its design proof rather than an exception ledger.

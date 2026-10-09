@@ -69,5 +69,21 @@
   "file_name_exceptions": "ci/file-name-exceptions.json",
   "test_dependencies": [
     "shakedown"
-  ]
+  ],
+  "glint_paths": [
+    "src",
+    "bench",
+    "examples",
+    "ci",
+    "build.zig"
+  ],
+  "glint": {
+    "rules": [
+      {
+        "id": "A004",
+        "level": "gate"
+      }
+    ],
+    "strict_suppressions": true
+  }
 }
