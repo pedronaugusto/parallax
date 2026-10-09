@@ -3,7 +3,11 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const module = b.addModule("parallax", .{ .root_source_file = b.path("src/parallax.zig"), .target = target, .optimize = optimize });
+    const modules = computationModules(b, target, optimize);
+    const module = modules.root;
+    inline for (.{ .{ "parallax", modules.root }, .{ "parallax.diff", modules.diff }, .{ "parallax.patch", modules.patch }, .{ "parallax.merge", modules.merge }, .{ "parallax.interner", modules.interner }, .{ "parallax.lines", modules.lines }, .{ "parallax.compare", modules.compare } }) |entry| {
+        b.modules.put(b.allocator, b.dupe(entry[0]), entry[1]) catch @panic("out of memory");
+    }
     const library = b.addLibrary(.{ .name = "parallax", .root_module = module });
     b.installArtifact(library);
     if (b.dep_prefix.len != 0) return;
@@ -16,10 +20,15 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    modules.importInto(tests.root_module);
     // Keep configuring on the initial fetch pass so preflight declares
     // every -D option before Zig validates it.
     const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize }) catch null;
-    if (shakedown) |dependency| tests.root_module.addImport("shakedown", dependency.module("shakedown"));
+    if (shakedown) |dependency| {
+        tests.root_module.addImport("shakedown", dependency.module("shakedown"));
+        modules.diff.addImport("shakedown", dependency.module("shakedown"));
+        modules.lines.addImport("shakedown", dependency.module("shakedown"));
+    }
     // The references' output, captured once, as data: git's, GNU patch's
     // and diff-match-patch's.
     for ([_][]const u8{
@@ -40,6 +49,13 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(tests).step);
     const check = b.step("check", "Compile the tests, library, example and benchmarks without running them");
     check.dependOn(&tests.step);
+    // Every named concern with tests also compiles as a test root on its own;
+    // the configured roots are the same graph consumers get.
+    inline for (.{ .{ "diff", modules.diff }, .{ "patch", modules.patch }, .{ "interner", modules.interner }, .{ "lines", modules.lines }, .{ "compare", modules.compare }, .{ "fit", modules.fit }, .{ "flags", modules.flags }, .{ "cleanup", modules.cleanup } }) |entry| {
+        const part_tests = b.addTest(.{ .name = b.fmt("parallax-{s}-tests", .{entry[0]}), .root_module = entry[1], .filters = tests.filters });
+        check.dependOn(&part_tests.step);
+        test_step.dependOn(&b.addRunArtifact(part_tests).step);
+    }
     const example = b.addExecutable(.{
         .name = "usage",
         .root_module = b.createModule(.{ .root_source_file = b.path("examples/usage.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "parallax", .module = module }} }),
@@ -95,7 +111,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("ci/freestanding.zig"),
             .target = freestanding,
             .optimize = .small,
-            .imports = &.{.{ .name = "parallax", .module = b.createModule(.{ .root_source_file = b.path("src/parallax.zig"), .target = freestanding, .optimize = .small }) }},
+            .imports = &.{.{ .name = "parallax", .module = computationModule(b, freestanding, .small) }},
         }),
     });
     b.step("check-freestanding", "Build the library for wasm32-freestanding").dependOn(&object.step);
@@ -119,7 +135,7 @@ pub fn build(b: *std.Build) void {
         });
         // A project that depends on parallax by path, with no packages to
         // fetch: the build a consumer gets.
-        preflight.addConsumerCheck(b, .{ .package = "parallax", .program = b.path("ci/consumer.zig") });
+        preflight.addConsumerCheck(b, .{ .package = "parallax", .program = b.path("ci/consumer.zig"), .modules = &.{ "parallax", "parallax.diff", "parallax.patch", "parallax.merge", "parallax.interner", "parallax.lines", "parallax.compare" }, .packages = &.{b.dependency("aegis", .{ .target = target, .optimize = optimize })} });
     } else {
         // Zig validates options even on the pass that discovers preflight.
         _ = b.option(bool, "ci-lint", "Run source checks before CI tests");
@@ -133,6 +149,76 @@ pub fn build(b: *std.Build) void {
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
     return b.allocator.dupe(std.Build.Module.Import, &.{.{
         .name = "parallax",
-        .module = b.createModule(.{ .root_source_file = b.path("src/parallax.zig"), .target = target, .optimize = optimize }),
+        .module = computationModule(b, target, optimize),
     }}) catch @panic("out of memory");
+}
+
+const Computation = struct {
+    root: *std.Build.Module,
+    diff: *std.Build.Module,
+    merge: *std.Build.Module,
+    patch: *std.Build.Module,
+    interner: *std.Build.Module,
+    lines: *std.Build.Module,
+    compare: *std.Build.Module,
+    cleanup: *std.Build.Module,
+    fit: *std.Build.Module,
+    change: *std.Build.Module,
+    flags: *std.Build.Module,
+
+    fn importInto(m: Computation, into: *std.Build.Module) void {
+        into.addImport("parallax.diff", m.diff);
+        into.addImport("parallax.merge", m.merge);
+        into.addImport("parallax.patch", m.patch);
+        into.addImport("parallax.interner", m.interner);
+        into.addImport("parallax.lines", m.lines);
+        into.addImport("parallax.compare", m.compare);
+        into.addImport("cleanup", m.cleanup);
+    }
+};
+
+fn computationModules(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) Computation {
+    const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
+    const m: Computation = .{
+        .root = sourceModule(b, "parallax", target, optimize),
+        .diff = sourceModule(b, "diff", target, optimize),
+        .merge = sourceModule(b, "merge", target, optimize),
+        .patch = sourceModule(b, "patch", target, optimize),
+        .interner = sourceModule(b, "interner", target, optimize),
+        .lines = sourceModule(b, "lines", target, optimize),
+        .compare = sourceModule(b, "compare", target, optimize),
+        .cleanup = sourceModule(b, "cleanup", target, optimize),
+        .fit = sourceModule(b, "fit", target, optimize),
+        .change = sourceModule(b, "change", target, optimize),
+        .flags = sourceModule(b, "flags", target, optimize),
+    };
+    m.importInto(m.root);
+    m.change.addImport("flags", m.flags);
+    m.diff.addImport("flags", m.flags);
+    m.fit.addImport("aegis", aegis);
+    m.interner.addImport("aegis", aegis);
+    m.cleanup.addImport("fit", m.fit);
+    m.cleanup.addImport("change", m.change);
+    m.diff.addImport("change", m.change);
+    m.diff.addImport("fit", m.fit);
+    m.diff.addImport("cleanup", m.cleanup);
+    m.diff.addImport("aegis", aegis);
+    m.diff.addImport("parallax.lines", m.lines);
+    m.diff.addImport("parallax.compare", m.compare);
+    m.diff.addImport("parallax.interner", m.interner);
+    m.merge.addImport("parallax.diff", m.diff);
+    m.merge.addImport("parallax.lines", m.lines);
+    m.merge.addImport("parallax.compare", m.compare);
+    m.patch.addImport("aegis", aegis);
+    m.patch.addImport("parallax.lines", m.lines);
+    m.patch.addImport("parallax.compare", m.compare);
+    return m;
+}
+
+fn sourceModule(b: *std.Build, name: []const u8, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
+    return b.createModule(.{ .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})), .target = target, .optimize = optimize });
+}
+
+fn computationModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
+    return computationModules(b, target, optimize).root;
 }

@@ -54,8 +54,8 @@ fn refining(gpa: std.mem.Allocator) !void {
     // Any sequence diffs once interned: here, words.
     var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
     defer interner.deinit();
-    var a: [3]u32 = undefined;
-    var b: [3]u32 = undefined;
+    var a: [3]parallax.ClassId = undefined;
+    var b: [3]parallax.ClassId = undefined;
     try interner.internSlice(&.{ "red", "green", "blue" }, &a);
     try interner.internSlice(&.{ "red", "yellow", "blue" }, &b);
     const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() });

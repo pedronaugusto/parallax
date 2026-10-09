@@ -442,11 +442,11 @@ fn merges(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void 
 fn mergeExtras(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, t: gen.Triple) !void {
     var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
     defer interner.deinit();
-    var ids: [3][]u32 = undefined;
+    var ids: [3][]parallax.ClassId = undefined;
     var made: usize = 0;
     defer for (ids[0..made]) |side| gpa.free(side);
     for (&ids, [_][]const u8{ t.base, t.ours, t.theirs }) |*side, text| {
-        var list: std.ArrayList(u32) = .empty;
+        var list: std.ArrayList(parallax.ClassId) = .empty;
         errdefer list.deinit(gpa);
         var it = std.mem.splitScalar(u8, text, '\n');
         while (it.next()) |line| {

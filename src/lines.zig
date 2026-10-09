@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 /// included; a last line without one is still a line.
 pub const Lines = struct {
     text: []const u8,
+    // aegis: measured-boundary: docs/design.md#numeric-boundaries; split bounds text before storing compact byte ends for the scan kernels.
     ends: []const u32,
 
     pub const empty: Lines = .{ .text = "", .ends = &.{} };

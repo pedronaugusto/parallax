@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const parallax = @import("../parallax.zig");
-const compare = @import("../compare.zig");
+const compare = @import("parallax.compare");
 
 const shakedown = @import("shakedown");
 const gen = shakedown.gen;
@@ -75,7 +75,7 @@ fn options(s: *shakedown.Source) parallax.Options {
             .whitespace = .{ .all = gen.weighted(s, &.{ 4, 1 }) == 1, .change = gen.weighted(s, &.{ 4, 1 }) == 1, .at_eol = gen.weighted(s, &.{ 4, 1 }) == 1, .cr_at_eol = gen.weighted(s, &.{ 4, 1 }) == 1 },
             .ignore_case = gen.weighted(s, &.{ 4, 1 }) == 1,
         },
-        .max_work = gen.oneOf(s, u32, &.{ 0, 0, 0, 1, 3, 20 }),
+        .max_work = .fromRaw(gen.oneOf(s, u32, &.{ 0, 0, 0, 1, 3, 20 })),
         .anchors = if (gen.weighted(s, &.{ 3, 1 }) == 1) &.{ "a", "{" } else &.{},
     };
 }
@@ -141,7 +141,7 @@ pub fn diffOne(_: void, case: *shakedown.Case) !void {
     whole.function_context = .c_function;
     try expectHunks(diff, whole);
     if (o.stop != null) return;
-    if (o.max_work == 0 and !o.minimal) {
+    if (o.max_work.raw() == 0 and !o.minimal) {
         const plain = diff.stat();
         var exact = o;
         exact.minimal = true;
@@ -342,11 +342,11 @@ fn expectSequenceMerge(d: *parallax.Differ, m: parallax.merge.Merge, o: parallax
     const gpa = std.testing.allocator;
     var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
     defer interner.deinit();
-    var ids: [3][]u32 = undefined;
+    var ids: [3][]parallax.ClassId = undefined;
     var made: usize = 0;
     defer for (ids[0..made]) |side| gpa.free(side);
     for (&ids, [_]parallax.Lines{ m.base, m.ours, m.theirs }) |*side, lines| {
-        side.* = try gpa.alloc(u32, lines.len());
+        side.* = try gpa.alloc(parallax.ClassId, lines.len());
         made += 1;
         for (side.*, 0..) |*id, i| id.* = try interner.intern(lines.get(@intCast(i)));
     }
@@ -422,30 +422,30 @@ fn expectTiles(lines: parallax.Lines, start: u32, len: u32, spans: []const paral
 pub fn sequenceOne(_: void, case: *shakedown.Case) !void {
     const s = case.source;
     const gpa = std.testing.allocator;
-    var old: [64]u32 = undefined;
-    var new: [64]u32 = undefined;
+    var old: [64]parallax.ClassId = undefined;
+    var new: [64]parallax.ClassId = undefined;
     const classes: u32 = @intCast(1 + gen.intRange(s, usize, 0, 7));
     const n_old = gen.intRange(s, usize, 0, old.len - 1);
     const n_new = gen.intRange(s, usize, 0, new.len - 1);
-    for (old[0..n_old]) |*id| id.* = @intCast(gen.intRange(s, usize, 0, classes - 1));
-    for (new[0..n_new], 0..) |*id, i| id.* = if (i < n_old and !(gen.weighted(s, &.{ 2, 1 }) == 1)) old[i] else @intCast(gen.intRange(s, usize, 0, classes - 1));
+    for (old[0..n_old]) |*id| id.* = .fromRaw(@intCast(gen.intRange(s, usize, 0, classes - 1)));
+    for (new[0..n_new], 0..) |*id, i| id.* = if (i < n_old and !(gen.weighted(s, &.{ 2, 1 }) == 1)) old[i] else .fromRaw(@intCast(gen.intRange(s, usize, 0, classes - 1)));
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     const algorithms = [_]parallax.Algorithm{ .myers, .patience, .histogram };
     const changes = try d.sequences(old[0..n_old], new[0..n_new], .{
-        .classes = classes,
+        .classes = .fromRaw(classes),
         .algorithm = algorithms[gen.intRange(s, usize, 0, 2)],
         .minimal = gen.boolean(s),
-        .max_work = if (gen.weighted(s, &.{ 3, 1 }) == 1) 2 else 0,
+        .max_work = .fromRaw(if (gen.weighted(s, &.{ 3, 1 }) == 1) 2 else 0),
     });
     var at_old: u32 = 0;
     var at_new: u32 = 0;
     for (changes) |c| {
-        try std.testing.expectEqualSlices(u32, old[at_old..c.old_start], new[at_new..c.new_start]);
+        try std.testing.expectEqualSlices(parallax.ClassId, old[at_old..c.old_start], new[at_new..c.new_start]);
         at_old = c.old_start + c.old_len;
         at_new = c.new_start + c.new_len;
     }
-    try std.testing.expectEqualSlices(u32, old[at_old..n_old], new[at_new..n_new]);
+    try std.testing.expectEqualSlices(parallax.ClassId, old[at_old..n_old], new[at_new..n_new]);
 }
 
 /// A random diff written as a patch: it parses back to its own hunks and

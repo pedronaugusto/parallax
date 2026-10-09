@@ -5,19 +5,19 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
-const threeway = @import("threeway.zig");
-const Lines = @import("lines.zig").Lines;
-const Differ = @import("Differ.zig");
-const compare_mod = @import("compare.zig");
+const diff = @import("parallax.diff");
+const Lines = @import("parallax.lines").Lines;
+const Differ = diff.Differ;
+const compare_mod = @import("parallax.compare");
 
-pub const Style = threeway.Style;
-pub const Level = threeway.Level;
-pub const Options = threeway.Options;
-pub const Range = threeway.Range;
-pub const Region = threeway.Region;
-pub const Merge = threeway.Merge;
-pub const SequenceOptions = threeway.SequenceOptions;
-pub const SequenceMerge = threeway.SequenceMerge;
+pub const Style = diff.MergeStyle;
+pub const Level = diff.MergeLevel;
+pub const Options = diff.MergeOptions;
+pub const Range = diff.Range;
+pub const Region = diff.Region;
+pub const Merge = diff.Merge;
+pub const SequenceOptions = diff.MergeSequenceOptions;
+pub const SequenceMerge = diff.SequenceMerge;
 
 /// What a conflict becomes in the text.
 pub const Resolve = enum {

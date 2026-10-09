@@ -9,13 +9,14 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const change_mod = @import("change.zig");
+const change_mod = @import("change");
 const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
-const compare_mod = @import("compare.zig");
+const compare_mod = @import("parallax.compare");
 const Compare = compare_mod.Compare;
-const Lines = @import("lines.zig").Lines;
+const Lines = @import("parallax.lines").Lines;
 const core = @import("core.zig");
+const class = @import("parallax.interner");
 
 /// Which conflict body `write` produces.
 pub const Style = enum {
@@ -119,7 +120,7 @@ pub const SequenceOptions = struct {
     /// Prove the Myers scripts minimal.
     minimal: bool = false,
     /// Every id is below this.
-    classes: u32,
+    classes: class.ClassCount,
     /// Changes the regions as for lines: narrowed or not, and (zdiff3) the
     /// ends both sides agree on moved out of each conflict.
     style: Style = .merge,
@@ -308,7 +309,7 @@ fn refine(in: Input) Allocator.Error!void {
         _ = try core.diff(core.Plain, in.gpa, .{}, in.core, in.ids_ours[s1..][0..@intCast(m.len1)], in.ids_theirs[s2..][0..@intCast(m.len2)], .{
             .algorithm = in.algorithm,
             .minimal = in.minimal,
-            .max_work = 0,
+            .max_work = .fromRaw(0),
             .classes = in.classes,
             .indent_heuristic = false,
             .stop = in.stop,

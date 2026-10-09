@@ -9,18 +9,20 @@ const Differ = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compare_mod = @import("compare.zig");
+const compare_mod = @import("parallax.compare");
 const Compare = compare_mod.Compare;
-const lines_mod = @import("lines.zig");
+const lines_mod = @import("parallax.lines");
 const Lines = lines_mod.Lines;
 const table_mod = @import("table.zig");
-const fit = @import("fit.zig");
-const change_mod = @import("change.zig");
-const Change = change_mod.Change;
+const fit = @import("fit");
+const change_mod = @import("change");
+/// One run produced by the workspace.
+pub const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
 const Diff = @import("script.zig").Diff;
 const threeway = @import("threeway.zig");
+const class = @import("parallax.interner");
 const refine_mod = @import("refine.zig");
 
 gpa: Allocator,
@@ -31,6 +33,7 @@ table: table_mod.Table = .{},
 /// Private: line ends of up to three inputs.
 ends: [3]std.ArrayList(u32) = .{ .empty, .empty, .empty },
 /// Private: the ids of every line of the inputs, side after side.
+// aegis: measured-boundary: docs/design.md#numeric-boundaries; line/table input bounds establish this compact one-domain class array.
 ids: std.ArrayList(u32) = .empty,
 /// Private: scripts; a merge keeps two.
 changes: std.ArrayList(Change) = .empty,
@@ -41,6 +44,11 @@ merge_buffers: threeway.Buffers = .{},
 refine_buffers: refine_mod.Buffers = .{},
 /// Private: work units the last call spent, which the tests read.
 work: u64 = 0,
+
+/// The number of Myers forward/backward sweeps.
+pub const Work = core.Work;
+/// Retained storage in bytes.
+pub const Bytes = fit.Bytes;
 
 pub const Error = error{ OutOfMemory, InputTooLarge };
 
@@ -56,7 +64,7 @@ pub const Options = struct {
     /// Work units (one forward plus backward Myers sweep) before the diff
     /// falls back to a coarser script that is still correct. 0 is no cap;
     /// git's own give-up rules stay in force.
-    max_work: u32 = 0,
+    max_work: Work = .fromRaw(0),
     /// Old-side lines starting with one of these stay context where an
     /// order allows: git --anchored. Read by patience only (git's --anchored
     /// selects patience).
@@ -80,9 +88,9 @@ pub const Indent = core.Indent;
 pub const SequenceOptions = struct {
     algorithm: Algorithm = .myers,
     minimal: bool = false,
-    max_work: u32 = 0,
+    max_work: Work = .fromRaw(0),
     /// Every id is below this.
-    classes: u32,
+    classes: class.ClassCount,
     /// Old-side positions to keep as context where possible (patience
     /// only).
     anchor: ?Predicate = null,
@@ -115,15 +123,15 @@ pub fn deinit(d: *Differ) void {
 
 /// Release the scratch when it holds more than `keep` bytes: a long-lived
 /// caller after one huge diff. The next call allocates again.
-pub fn shrink(d: *Differ, keep: usize) void {
-    var total: usize = d.table.slots.capacity * 8 + d.table.first.capacity * 4;
-    total += d.refine_buffers.capacity();
+pub fn shrink(d: *Differ, keep: Bytes) void {
+    var total: Bytes = fit.add(fit.bytes(d.table.slots), fit.bytes(d.table.first));
+    total = fit.add(total, d.refine_buffers.capacity());
     d.eachList(&total, struct {
-        fn f(sum: *usize, list: anytype) void {
-            sum.* += list.capacity * @sizeOf(@TypeOf(list.items[0]));
+        fn f(sum: *Bytes, list: anytype) void {
+            sum.* = fit.add(sum.*, fit.bytes(list));
         }
     }.f);
-    if (total <= keep) return;
+    if (total.raw() <= keep.raw()) return;
     d.eachList(d.gpa, struct {
         fn f(gpa: Allocator, list: anytype) void {
             list.clearAndFree(gpa);
@@ -226,7 +234,7 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
     d.work = try core.diff(core.LineSource, d.gpa, source, &d.scratch, d.ids.items[0..n_old], d.ids.items[n_old..], .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
-        .max_work = options.max_work,
+        .max_work = options.max_work.convert(u64) catch @panic("u32 work cap must fit u64"),
         .classes = classes,
         .indent_heuristic = options.indent_heuristic,
         .stop = options.stop,
@@ -238,20 +246,22 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
 
 /// Diff two interned sequences (every id below `options.classes`). The
 /// changes are valid until the next call on `d`.
-pub fn sequences(d: *Differ, old: []const u32, new: []const u32, options: SequenceOptions) Error![]const Change {
+pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const class.ClassId, options: SequenceOptions) Error![]const Change {
+    const old = rawIds(old_ids);
+    const new = rawIds(new_ids);
     d.work = 0;
     d.changes.clearRetainingCapacity();
     if (@as(u64, old.len) + new.len > std.math.maxInt(u32)) return error.InputTooLarge;
     if (std.debug.runtime_safety) {
-        for (old) |id| std.debug.assert(id < options.classes);
-        for (new) |id| std.debug.assert(id < options.classes);
+        for (old) |id| std.debug.assert(id < options.classes.raw());
+        for (new) |id| std.debug.assert(id < options.classes.raw());
     }
     if (std.mem.eql(u32, old, new)) return d.changes.items;
     d.work = try core.diff(core.SequenceSource, d.gpa, .{ .anchor_fn = options.anchor, .indent_fn = options.indent }, &d.scratch, old, new, .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
-        .max_work = options.max_work,
-        .classes = options.classes,
+        .max_work = options.max_work.convert(u64) catch @panic("u32 work cap must fit u64"),
+        .classes = options.classes.raw(),
         .indent_heuristic = options.indent != null,
         .stop = options.stop,
     }, &d.changes);
@@ -284,7 +294,7 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
     const run: core.Run = .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
-        .max_work = 0,
+        .max_work = .fromRaw(0),
         .classes = classes,
         .indent_heuristic = false,
         .stop = options.stop,
@@ -325,13 +335,16 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
 /// The three-way merge of two interned sequences against a third (every id
 /// below `options.classes`), as regions over the three. Valid until the
 /// next call on `d`.
-pub fn mergeSequences(d: *Differ, base: []const u32, ours: []const u32, theirs: []const u32, options: threeway.SequenceOptions) Error!threeway.SequenceMerge {
+pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []const class.ClassId, their_ids: []const class.ClassId, options: threeway.SequenceOptions) Error!threeway.SequenceMerge {
+    const base = rawIds(base_ids);
+    const ours = rawIds(our_ids);
+    const theirs = rawIds(their_ids);
     d.work = 0;
     const regions = &d.merge_buffers.regions;
     regions.clearRetainingCapacity();
     if (@as(u64, base.len) + ours.len + theirs.len > std.math.maxInt(u32)) return error.InputTooLarge;
     if (std.debug.runtime_safety) {
-        for ([_][]const u32{ base, ours, theirs }) |side| for (side) |id| std.debug.assert(id < options.classes);
+        for ([_][]const u32{ base, ours, theirs }) |side| for (side) |id| std.debug.assert(id < options.classes.raw());
     }
     const lens: [3]u32 = .{ @intCast(base.len), @intCast(ours.len), @intCast(theirs.len) };
     if (std.mem.eql(u32, ours, theirs)) {
@@ -341,8 +354,8 @@ pub fn mergeSequences(d: *Differ, base: []const u32, ours: []const u32, theirs: 
     const run: core.Run = .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
-        .max_work = 0,
-        .classes = options.classes,
+        .max_work = .fromRaw(0),
+        .classes = options.classes.raw(),
         .indent_heuristic = false,
         .stop = options.stop,
     };
@@ -365,7 +378,7 @@ pub fn mergeSequences(d: *Differ, base: []const u32, ours: []const u32, theirs: 
         .lens = lens,
         .ids_ours = ours,
         .ids_theirs = theirs,
-        .classes = options.classes,
+        .classes = options.classes.raw(),
         .source = .{ .sequence = options.content },
         .algorithm = options.algorithm,
         .minimal = options.minimal,
@@ -403,4 +416,11 @@ pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.Refine
         .change = change,
         .options = options,
     });
+}
+
+/// aegis: measured-boundary: docs/design.md#numeric-boundaries; class IDs
+/// have the scalar layout checked by their owner. Callers establish shared
+/// membership; runtime-safety builds also check it before kernel entry.
+fn rawIds(ids: []const class.ClassId) []const u32 {
+    return @ptrCast(ids); // safe: ClassId has u32 size/alignment and every bit pattern is a valid raw class representation
 }

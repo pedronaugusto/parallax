@@ -1,131 +1,81 @@
-//! parallax: line diff, three-way merge and patches.
-//!
-//! git's xdiff output byte for byte (Myers with git's heuristics, minimal,
-//! patience, anchored, histogram, the slide and the indentation heuristic,
-//! the whitespace flags, hunks and the unified body, the three-way merge in
-//! the merge, diff3 and zdiff3 styles), on dense ids, with a reusable
-//! workspace that allocates nothing once warm. No Io: every function is
-//! pure computation.
+//! Line and sequence differences, three-way merges and unified patches.
+//! Concern modules share declaration identities through the module graph.
 
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-
-const compare = @import("compare.zig");
-const lines_mod = @import("lines.zig");
-const change = @import("change.zig");
-const script = @import("script.zig");
-const hunks = @import("hunks.zig");
-const unified = @import("unified.zig");
+const diff = @import("parallax.diff");
 
 /// Which whitespace differences two lines may have and still be the same.
-pub const Whitespace = compare.Whitespace;
+pub const Whitespace = diff.Whitespace;
 /// What counts as the same line: whitespace and ASCII case.
-pub const Compare = compare.Compare;
+pub const Compare = diff.Compare;
 /// Myers, patience or histogram.
-pub const Algorithm = change.Algorithm;
+pub const Algorithm = diff.Algorithm;
 /// A text split at '\n', by end offsets.
-pub const Lines = lines_mod.Lines;
+pub const Lines = diff.Lines;
 /// One run of the script that differs.
-pub const Change = change.Change;
+pub const Change = diff.Change;
 /// Added and removed line counts.
-pub const Stat = script.Stat;
+pub const Stat = diff.Stat;
 /// One step of the script: equal, delete, insert or replace.
-pub const Op = script.Op;
+pub const Op = diff.Op;
 /// Steps over a diff's script, allocating nothing.
-pub const OpIterator = script.OpIterator;
+pub const OpIterator = diff.OpIterator;
 /// A finished line diff: the two sides and the script.
-pub const Diff = script.Diff;
+pub const Diff = diff.Diff;
 /// The reusable workspace every diff and merge goes through.
-pub const Differ = @import("Differ.zig");
+pub const Differ = diff.Differ;
+/// Myers forward/backward sweep count.
+pub const Work = diff.Work;
+/// Retained storage byte count for `Differ.shrink`.
+pub const Bytes = diff.Bytes;
 /// How a line diff is taken.
-pub const Options = Differ.Options;
+pub const Options = diff.Options;
 /// How a diff of two id sequences is taken.
-pub const SequenceOptions = Differ.SequenceOptions;
+pub const SequenceOptions = diff.SequenceOptions;
 /// A caller's test of one position of the old sequence.
-pub const Predicate = Differ.Predicate;
+pub const Predicate = diff.Predicate;
 /// A caller's indentation per token.
-pub const Indent = Differ.Indent;
+pub const Indent = diff.Indent;
 /// How changes group into hunks.
-pub const HunkOptions = hunks.HunkOptions;
+pub const HunkOptions = diff.HunkOptions;
 /// A caller's test of one line, given with its newline.
-pub const LinePredicate = hunks.LinePredicate;
+pub const LinePredicate = diff.LinePredicate;
 /// One hunk and the changes inside it.
-pub const Hunk = hunks.Hunk;
+pub const Hunk = diff.Hunk;
 /// Hunks over a diff, allocating nothing.
-pub const HunkIterator = hunks.HunkIterator;
+pub const HunkIterator = diff.HunkIterator;
 /// The text after a hunk's second `@@`.
-pub const Heading = unified.Heading;
+pub const Heading = diff.Heading;
 /// How the unified writer writes.
-pub const UnifiedOptions = unified.UnifiedOptions;
+pub const UnifiedOptions = diff.UnifiedOptions;
 /// Write a diff as a unified diff body, as git prints it.
-pub const writeUnified = unified.writeUnified;
+pub const writeUnified = diff.writeUnified;
+/// An equivalence class, distinct from a sequence position.
+pub const ClassId = diff.ClassId;
+/// The number of classes in an interning domain.
+pub const ClassCount = diff.ClassCount;
 /// Dense ids for any type with a hash and an equality.
-pub const Interner = @import("interner.zig").Interner;
-const refine = @import("refine.zig");
+pub const Interner = diff.Interner;
 /// How `Differ.refine` cuts lines into tokens.
-pub const Tokens = refine.Tokens;
+pub const Tokens = diff.Tokens;
 /// How `Differ.refine` diffs tokens.
-pub const RefineOptions = refine.RefineOptions;
+pub const RefineOptions = diff.RefineOptions;
 /// diff-match-patch's cleanups, for `RefineOptions.cleanup`.
-pub const Cleanup = refine.Cleanup;
+pub const Cleanup = diff.Cleanup;
 /// Bytes of one side, changed or not.
-pub const Span = refine.Span;
+pub const Span = diff.Span;
 /// The spans of one change, per side.
-pub const Refined = refine.Refined;
-/// The three-way merge.
-pub const merge = @import("merge.zig");
-/// Unified patches: parse and apply.
-pub const patch = @import("patch.zig");
-
-/// A one-shot line diff that owns its memory.
-pub const OwnedDiff = struct {
-    diff: Diff,
-    /// Private: what `diff` borrows.
-    gpa: Allocator,
-    ends: [2][]u32,
-    changes: []Change,
-
-    pub fn deinit(o: *OwnedDiff) void {
-        o.gpa.free(o.ends[0]);
-        o.gpa.free(o.ends[1]);
-        o.gpa.free(o.changes);
-        o.* = undefined;
-    }
-};
-
-/// One-shot form of `Differ.lines`. The result borrows `old` and `new`.
-pub fn diffLines(gpa: Allocator, old: []const u8, new: []const u8, options: Options) Differ.Error!OwnedDiff {
-    var d: Differ = .init(gpa);
-    defer d.deinit();
-    const diff = try d.lines(old, new, options);
-    const ends_old = try gpa.dupe(u32, diff.old.ends);
-    errdefer gpa.free(ends_old);
-    const ends_new = try gpa.dupe(u32, diff.new.ends);
-    errdefer gpa.free(ends_new);
-    const changes = try gpa.dupe(Change, diff.changes);
-    return .{
-        .diff = .{
-            .old = .{ .text = old, .ends = ends_old },
-            .new = .{ .text = new, .ends = ends_new },
-            .changes = changes,
-            .compare = options.compare,
-        },
-        .gpa = gpa,
-        .ends = .{ ends_old, ends_new },
-        .changes = changes,
-    };
-}
+pub const Refined = diff.Refined;
+/// A one-shot diff that owns its workspace memory.
+pub const OwnedDiff = diff.OwnedDiff;
+/// One-shot line diff, borrowing the input text.
+pub const diffLines = diff.diffLines;
+/// Three-way merge rendering and marker parsing.
+pub const merge = @import("parallax.merge");
+/// Unified patch parsing and application.
+pub const patch = @import("parallax.patch");
 
 test {
-    _ = compare;
-    _ = lines_mod;
-    _ = @import("table.zig");
-    _ = @import("slide.zig");
-    _ = @import("interner.zig");
-    _ = @import("refine.zig");
-    _ = @import("cleanup.zig");
-    _ = @import("flags.zig");
-    _ = @import("myers.zig");
-    _ = @import("fit.zig");
-    _ = @import("patch/parse.zig");
+    _ = diff;
+    _ = merge;
+    _ = patch;
 }

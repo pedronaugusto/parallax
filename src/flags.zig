@@ -5,6 +5,7 @@
 
 const std = @import("std");
 
+// aegis: measured-boundary: docs/design.md#numeric-boundaries; bounded sequence lengths and sentinel storage establish these raw kernel indexes.
 pub const Flags = struct {
     /// Private: byte `i + 1` is line i's flag.
     bytes: [*]u8,

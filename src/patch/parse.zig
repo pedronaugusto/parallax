@@ -3,6 +3,7 @@
 //! copied; the parse is one pass, linear in the text.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const Allocator = std.mem.Allocator;
 const types = @import("types.zig");
 const Line = types.Line;
@@ -10,6 +11,7 @@ const Hunk = types.Hunk;
 const File = types.File;
 
 /// The lines of the patch, each with its newline.
+// aegis: design: docs/design.md#numeric-boundaries; Reader offsets advance only through bounded slices, while header arithmetic is checked separately.
 const Reader = struct {
     text: []const u8,
     at: usize = 0,
@@ -177,10 +179,13 @@ fn range(head: []const u8, at: *usize) ?[2]u32 {
 }
 
 fn number(head: []const u8, at: *usize) ?u32 {
+    var value: aegis.int.Checked(u32) = .init(0);
     const from = at.*;
-    while (at.* < head.len and std.ascii.isDigit(head[at.*])) at.* += 1;
+    while (at.* < head.len and std.ascii.isDigit(head[at.*])) : (at.* += 1) {
+        value = (value.mul(10) catch return null).add(head[at.*] - '0') catch return null;
+    }
     if (at.* == from) return null;
-    return std.fmt.parseInt(u32, head[from..at.*], 10) catch null;
+    return value.raw();
 }
 
 /// Read a unified patch. The result borrows `text`.
@@ -250,4 +255,12 @@ test "a malformed hunk says what and where" {
     try std.testing.expectEqual(@as(u32, 3), diagnostics.line);
     try std.testing.expectError(error.UnexpectedLine, parse(std.testing.allocator, "--- a\n+++ b\n@@ -1 +1 @@\n*a\n", .{ .diagnostics = &diagnostics }));
     try std.testing.expectError(error.HunkLengthMismatch, parse(std.testing.allocator, "--- a\n+++ b\n@@ -1 +1 @@\n-a\n-b\n", .{}));
+}
+
+test "checked patch header numbers accept u32 maximum and reject decimal overflow" {
+    const largest = parseHead("@@ -4294967295,0 +4294967295,0 @@").?;
+    try std.testing.expectEqual(std.math.maxInt(u32), largest.old_start);
+    try std.testing.expect(parseHead("@@ -4294967296,0 +1,0 @@") == null);
+    try std.testing.expect(parseHead("@@ -1,0 +99999999999999999999999,0 @@") == null);
+    try std.testing.expect(parseHead("@@ -1,4294967296 +1,0 @@") == null);
 }

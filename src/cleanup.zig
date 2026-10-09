@@ -14,7 +14,8 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Change = @import("change.zig").Change;
+const fit = @import("fit");
+const Change = @import("change").Change;
 
 /// What `Differ.refine` does to the token script before it becomes spans.
 pub const Cleanup = enum {
@@ -47,8 +48,8 @@ pub const Buffers = struct {
     }
 
     /// Bytes held.
-    pub fn capacity(b: *const Buffers) usize {
-        return b.ops.capacity * @sizeOf(Op) + b.stack.capacity * 4;
+    pub fn capacity(b: *const Buffers) fit.Bytes {
+        return fit.add(fit.bytes(b.ops), fit.bytes(b.stack));
     }
 };
 

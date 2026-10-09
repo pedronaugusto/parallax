@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- `Options.max_work` and `SequenceOptions.max_work` take `Work` (Myers sweeps); construct a cap with `Work.fromRaw(n)`. `Differ.shrink` takes `Bytes`, constructed with `Bytes.fromRaw(n)`.
+- `Interner.intern` returns `ClassId`, `get` takes `ClassId`, and `internSlice` writes `[]ClassId`. `classes` returns `ClassCount`. `Differ.sequences` and `mergeSequences` take `[]const ClassId`; their options take `ClassCount` for `classes`. Import raw external IDs/counts explicitly with `fromRaw`.
+
+
 ### Changed
+
+- Use published aegis for equivalence-class IDs/counts, work caps, typed scratch byte accounting and patch header integers; retain compact raw kernels behind explicit boundaries.
+- Expose the existing diff, merge, patch, interner, lines and comparison concerns as independent build modules with one owner per shared declaration; the root is a facade.
+- Pin green published aegis a5d17d0, preflight e80b9a6 and shakedown b7458b6; regenerate CI from the pinned preflight.
 
 - Property tests use shakedown generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; allocation failure sweeps use its NoResize allocator and repeated fixtures use its corpus helpers.
 - Consume shakedown unchanged from its upstream module, including its 32-bit generator fixes.

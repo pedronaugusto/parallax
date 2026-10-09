@@ -32,3 +32,7 @@ pub const ApplyError = types.ApplyError;
 pub const parse = @import("patch/parse.zig").parse;
 /// Write a text with one file's hunks applied.
 pub const apply = @import("patch/apply.zig").apply;
+
+test {
+    _ = @import("patch/parse.zig");
+}

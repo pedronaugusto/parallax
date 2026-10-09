@@ -15,8 +15,8 @@ computation, and a reusable workspace makes no allocation once it is warm.
 
 Requires Zig 0.17.0. Fetch with `zig fetch --save
 git+https://github.com/pedronaugusto/parallax`, then obtain the `parallax` module
-through `b.dependency` and add it to your executable's imports. parallax has no
-dependencies and makes no OS calls; it builds for every target,
+through `b.dependency` and add it to your executable's imports. Computation uses
+published aegis and std and makes no OS calls; it builds for every target,
 wasm32-freestanding included.
 
 ## Usage
@@ -84,8 +84,8 @@ for (refined.new) |span| {
 // Any sequence diffs once interned: here, words.
 var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
 defer interner.deinit();
-var a: [3]u32 = undefined;
-var b: [3]u32 = undefined;
+var a: [3]parallax.ClassId = undefined;
+var b: [3]parallax.ClassId = undefined;
 try interner.internSlice(&.{ "red", "green", "blue" }, &a);
 try interner.internSlice(&.{ "red", "yellow", "blue" }, &b);
 const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() });
@@ -142,7 +142,7 @@ it, by the indentation heuristic or to line up with a change on the other side.
 Every recursion in git is an explicit work stack here, taken in the same order,
 so stack use is constant: the deep inputs diff on a 64 KiB stack.
 
-`Options.max_work` caps the work a diff may do, in Myers sweeps; past it the rest
+`Options.max_work = .fromRaw(n)` caps the work a diff may do, in Myers sweeps; past it the rest
 is described as one deletion and one insertion. The cap is a count, not a clock,
 so the answer is the same on every machine. `Options.stop` is the flag a caller
 raises instead, from any thread, when it no longer wants the answer: it is read
@@ -277,6 +277,16 @@ Every input is under 4 GiB, and the inputs of one call hold fewer than 2^32 line
 between them; anything larger is `error.InputTooLarge`. Past that, a diff, merge
 or refinement fails only with `error.OutOfMemory`; `patch.parse` and `patch.apply`
 have errors of their own, named in their error sets.
+
+The root module is a facade. For one concern, take `parallax.diff`,
+`parallax.merge`, `parallax.patch`, `parallax.interner`, `parallax.lines` or
+`parallax.compare` from the same dependency. They share type identities.
+`ClassId` distinguishes an equivalence class from a position; `ClassCount`,
+`Work` and `Bytes` distinguish counts in public options and scratch retention.
+Use `fromRaw` when importing a raw value, and `raw()` only at an explicit
+representation boundary. `Differ.shrink(.fromRaw(n))` retains scratch up to
+n bytes before releasing it all. Production computation depends on aegis/std;
+preflight and shakedown remain lazy build/test dependencies.
 
 ## Scope
 

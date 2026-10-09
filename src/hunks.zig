@@ -4,9 +4,9 @@
 //! nothing is allocated.
 
 const std = @import("std");
-const Change = @import("change.zig").Change;
-const Lines = @import("lines.zig").Lines;
-const compare = @import("compare.zig");
+const Change = @import("change").Change;
+const Lines = @import("parallax.lines").Lines;
+const compare = @import("parallax.compare");
 
 /// A caller's test of one line, given with its newline.
 pub const LinePredicate = struct {
@@ -42,6 +42,7 @@ pub const Heading = struct {
     }
 };
 
+// aegis: no-danger: docs/design.md#numeric-boundaries; both context values count only lines, thresholds widen to u64 and ranges clamp to each bounded file.
 pub const HunkOptions = struct {
     /// Lines of context on each side of a change.
     context: u32 = 3,

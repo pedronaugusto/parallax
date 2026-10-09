@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Compare = @import("../compare.zig").Compare;
+const Compare = @import("parallax.compare").Compare;
 
 /// One line of a hunk.
 pub const Line = struct {
@@ -18,6 +18,7 @@ pub const Line = struct {
 
 /// One `@@` hunk, with its ranges as written: 1-based, and for an empty
 /// range the line before it.
+// aegis: design: docs/design.md#numeric-boundaries; parsed textual u32 ranges are count-validated and widened to i64 before application arithmetic.
 pub const Hunk = struct {
     old_start: u32,
     old_len: u32,
@@ -74,6 +75,7 @@ pub const Rejects = enum {
     skip,
 };
 
+// aegis: no-danger: docs/design.md#numeric-boundaries; fuzz and offsets count only lines, and offset/search arithmetic widens to i64 before bounding against the input.
 pub const ApplyOptions = struct {
     /// GNU patch's fuzz factor: how many leading and trailing context lines
     /// a hunk may ignore when it does not match as it stands (0 is exact).

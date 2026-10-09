@@ -4,10 +4,11 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compare_mod = @import("compare.zig");
-const fit = @import("fit.zig");
-const Compare = compare_mod.Compare;
-const Lines = @import("lines.zig").Lines;
+const compare_mod = @import("parallax.compare");
+const fit = @import("fit");
+/// Comparison contract accepted by the line table.
+pub const Compare = compare_mod.Compare;
+const Lines = @import("parallax.lines").Lines;
 
 /// The texts of one call, interned into one table: a diff's two, a merge's
 /// three. A line is named globally by its side's offset plus its index.
@@ -23,6 +24,7 @@ pub const Texts = struct {
     }
 };
 
+// aegis: measured-boundary: docs/design.md#numeric-boundaries; splitAll bounds total lines before the packed one-domain class table is built.
 pub const Table = struct {
     /// Private: the slots, a power of two of them. A taken slot holds the
     /// high half of a line's hash (which also picks its slot) above its id

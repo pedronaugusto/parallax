@@ -5,15 +5,16 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compare_mod = @import("compare.zig");
+const fit = @import("fit");
+const compare_mod = @import("parallax.compare");
 const Compare = compare_mod.Compare;
-const Lines = @import("lines.zig").Lines;
-const change_mod = @import("change.zig");
+const Lines = @import("parallax.lines").Lines;
+const change_mod = @import("change");
 const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
-const Interner = @import("interner.zig").Interner;
-const cleanup_mod = @import("cleanup.zig");
+const Interner = @import("parallax.interner").Interner;
+const cleanup_mod = @import("cleanup");
 
 /// What refinement does to the token script before it becomes spans.
 pub const Cleanup = cleanup_mod.Cleanup;
@@ -51,6 +52,7 @@ pub const RefineOptions = struct {
 };
 
 /// Bytes `start .. start + len` of a side's text, changed or not.
+// aegis: measured-boundary: docs/design.md#numeric-boundaries; bounded token/line ends produce compact byte-only span views for iteration.
 pub const Span = struct { start: u32, len: u32, changed: bool };
 
 /// Spans covering the change's lines on each side, in order. No span
@@ -88,11 +90,11 @@ pub const Buffers = struct {
     }
 
     /// Bytes held.
-    pub fn capacity(b: *const Buffers) usize {
-        var n: usize = b.ids.capacity * 4 + b.changes.capacity * @sizeOf(Change) + b.cleanup.capacity();
-        for (b.ends) |e| n += e.capacity * 4;
-        for (b.spans) |s| n += s.capacity * @sizeOf(Span);
-        if (b.interner) |i| n += i.items.capacity * @sizeOf([]const u8) + i.slots.capacity * 16;
+    pub fn capacity(b: *const Buffers) fit.Bytes {
+        var n: fit.Bytes = fit.add(fit.add(fit.bytes(b.ids), fit.bytes(b.changes)), b.cleanup.capacity());
+        for (b.ends) |e| n = fit.add(n, fit.bytes(e));
+        for (b.spans) |s| n = fit.add(n, fit.bytes(s));
+        if (b.interner) |i| n = fit.add(n, fit.add(fit.bytes(i.items), fit.bytes(i.slots)));
         return n;
     }
 };
@@ -184,11 +186,12 @@ pub fn refine(in: Input) Allocator.Error!Refined {
         var at = froms[s];
         const ids = if (s == 0) b.ids.items[0..n_old] else b.ids.items[n_old..];
         for (b.ends[s].items, ids) |end, *id| {
-            id.* = interner.intern(sides[s].text[at..end]) catch |err| switch (err) {
+            // aegis: measured-boundary: docs/design.md#numeric-boundaries; interned classes enter the raw token kernel after bounded tokenization.
+            id.* = (interner.intern(sides[s].text[at..end]) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 // Fewer tokens than bytes, and the inputs are under 4 GiB.
                 error.TooManyClasses => unreachable,
-            };
+            }).raw();
             at = end;
         }
     }
@@ -196,8 +199,8 @@ pub fn refine(in: Input) Allocator.Error!Refined {
     _ = try core.diff(core.Plain, in.gpa, .{}, in.core, b.ids.items[0..n_old], b.ids.items[n_old..], .{
         .algorithm = in.options.algorithm,
         .minimal = false,
-        .max_work = 0,
-        .classes = interner.classes(),
+        .max_work = .fromRaw(0),
+        .classes = interner.classes().raw(),
         .indent_heuristic = false,
         .stop = in.options.stop,
     }, &b.changes);

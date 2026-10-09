@@ -54,14 +54,14 @@ test "a warm Differ allocates nothing, for any algorithm or a merge" {
         try std.testing.expectEqual(warm, counts(&counting));
     }
     // The same merge over ids.
-    var ids: [3][]u32 = undefined;
+    var ids: [3][]parallax.ClassId = undefined;
     var classes: u32 = 0;
     for (&ids, [_][]const u8{ triple.base, triple.ours, triple.theirs }) |*side, text| {
         side.* = try lineIds(gpa, text, &classes);
     }
     defer for (ids) |side| gpa.free(side);
     for ([_]parallax.merge.Style{ .merge, .diff3, .zdiff3 }) |style| {
-        const options: parallax.merge.SequenceOptions = .{ .algorithm = .histogram, .style = style, .classes = classes };
+        const options: parallax.merge.SequenceOptions = .{ .algorithm = .histogram, .style = style, .classes = .fromRaw(classes) };
         _ = try d.mergeSequences(ids[0], ids[1], ids[2], options);
         const warm = counts(&counting);
         _ = try d.mergeSequences(ids[0], ids[1], ids[2], options);
@@ -70,15 +70,15 @@ test "a warm Differ allocates nothing, for any algorithm or a merge" {
 }
 
 /// Each line's id, the same line the same id across every call.
-fn lineIds(gpa: std.mem.Allocator, text: []const u8, classes: *u32) ![]u32 {
-    var ids: std.ArrayList(u32) = .empty;
+fn lineIds(gpa: std.mem.Allocator, text: []const u8, classes: *u32) ![]parallax.ClassId {
+    var ids: std.ArrayList(parallax.ClassId) = .empty;
     errdefer ids.deinit(gpa);
     var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         if (it.peek() == null and line.len == 0) break;
         const id: u32 = @truncate(std.hash.Wyhash.hash(0, line) % 4096);
         classes.* = @max(classes.*, id + 1);
-        try ids.append(gpa, id);
+        try ids.append(gpa, .fromRaw(id));
     }
     return ids.toOwnedSlice(gpa);
 }
@@ -199,11 +199,11 @@ fn refineAll(gpa: std.mem.Allocator, old: []const u8, new: []const u8) !void {
     for (diff.changes) |c| _ = try d.refine(diff, c, .{ .tokens = .words, .cleanup = .efficiency });
 }
 
-fn mergeIds(gpa: std.mem.Allocator, base: []const u32, ours: []const u32, theirs: []const u32, classes: u32) !void {
+fn mergeIds(gpa: std.mem.Allocator, base: []const parallax.ClassId, ours: []const parallax.ClassId, theirs: []const parallax.ClassId, classes: u32) !void {
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
-    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = classes, .style = .zdiff3 });
-    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = classes, .algorithm = .histogram });
+    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = .fromRaw(classes), .style = .zdiff3 });
+    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = .fromRaw(classes), .algorithm = .histogram });
 }
 
 fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: []const u8) !void {
@@ -223,7 +223,7 @@ test "every allocation failure is survived without a leak" {
     const triple = try gen.w7b(gpa, 60);
     defer triple.deinit(gpa);
     try std.testing.checkAllAllocationFailures(gpa, mergeAll, .{ triple.base, triple.ours, triple.theirs });
-    var ids: [3][]u32 = undefined;
+    var ids: [3][]parallax.ClassId = undefined;
     var classes: u32 = 0;
     for (&ids, [_][]const u8{ triple.base, triple.ours, triple.theirs }) |*side, text| side.* = try lineIds(gpa, text, &classes);
     defer for (ids) |side| gpa.free(side);
@@ -276,11 +276,11 @@ test "a stop flag raised while a diff runs ends it early with a script that appl
     defer gpa.free(old);
     const new = try lineIds(gpa, pair.new, &classes);
     defer gpa.free(new);
-    const whole = try gpa.dupe(parallax.Change, try d.sequences(old, new, .{ .classes = classes, .algorithm = .patience }));
+    const whole = try gpa.dupe(parallax.Change, try d.sequences(old, new, .{ .classes = .fromRaw(classes), .algorithm = .patience }));
     defer gpa.free(whole);
     var flag: std.atomic.Value(bool) = .init(false);
     const stopped = try d.sequences(old, new, .{
-        .classes = classes,
+        .classes = .fromRaw(classes),
         .algorithm = .patience,
         .anchor = .{ .context = @ptrCast(&flag), .at = raiseOnFirstAnchor }, // safe: raiseOnFirstAnchor reads it back as the flag
         .stop = &flag,
@@ -291,11 +291,11 @@ test "a stop flag raised while a diff runs ends it early with a script that appl
     var at_old: u32 = 0;
     var at_new: u32 = 0;
     for (stopped) |c| {
-        try std.testing.expectEqualSlices(u32, old[at_old..c.old_start], new[at_new..c.new_start]);
+        try std.testing.expectEqualSlices(parallax.ClassId, old[at_old..c.old_start], new[at_new..c.new_start]);
         at_old = c.old_start + c.old_len;
         at_new = c.new_start + c.new_len;
     }
-    try std.testing.expectEqualSlices(u32, old[at_old..], new[at_new..]);
+    try std.testing.expectEqualSlices(parallax.ClassId, old[at_old..], new[at_new..]);
 }
 
 test "an input a u32 cannot index is refused" {
@@ -306,4 +306,23 @@ test "an input a u32 cannot index is refused" {
     var d: parallax.Differ = .init(std.testing.allocator);
     defer d.deinit();
     try std.testing.expectError(error.InputTooLarge, d.lines(huge, "", .{}));
+}
+
+test "typed scratch retention keeps warm memory and releases it below the byte cap" {
+    var fixed: shakedown.alloc.NoResize = .init(std.testing.allocator);
+    var counting: std.testing.FailingAllocator = .init(fixed.allocator(), .{});
+    var d: parallax.Differ = .init(counting.allocator());
+    defer d.deinit();
+    const pair = try gen.w2(std.testing.allocator, 150, 0.3);
+    defer pair.deinit(std.testing.allocator);
+    const diff = try d.lines(pair.old, pair.new, .{});
+    for (diff.changes) |c| _ = try d.refine(diff, c, .{ .cleanup = .semantic });
+    const warm = counts(&counting);
+    d.shrink(.fromRaw(std.math.maxInt(usize)));
+    try std.testing.expectEqual(warm, counts(&counting));
+    d.shrink(.fromRaw(0));
+    try std.testing.expect(counting.deallocations > warm.frees);
+    const released = counts(&counting);
+    _ = try d.lines(pair.old, pair.new, .{});
+    try std.testing.expect(counting.allocations > released.allocations);
 }

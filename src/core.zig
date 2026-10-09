@@ -4,17 +4,18 @@
 //! from.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const Allocator = std.mem.Allocator;
-const Flags = @import("flags.zig").Flags;
-const fit = @import("fit.zig");
-const change = @import("change.zig");
+const Flags = @import("flags").Flags;
+const fit = @import("fit");
+const change = @import("change");
 const Change = change.Change;
 const Algorithm = change.Algorithm;
 const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
 const patience = @import("patience.zig");
 const slide = @import("slide.zig");
-const Lines = @import("lines.zig").Lines;
+const Lines = @import("parallax.lines").Lines;
 
 pub const Buffers = struct {
     myers: myers.Buffers = .{},
@@ -24,10 +25,18 @@ pub const Buffers = struct {
     flags_b: std.ArrayList(u8) = .empty,
 };
 
+/// Myers forward/backward sweep count, distinct from lines and bytes.
+pub const Work = aegis.units.Count(struct {}, u32);
+const KernelWork = aegis.units.Count(Work.Domain, u64);
+comptime {
+    std.debug.assert(@sizeOf(Work) == @sizeOf(u32));
+    std.debug.assert(@sizeOf(KernelWork) == @sizeOf(u64));
+}
+
 pub const Run = struct {
     algorithm: Algorithm,
     minimal: bool,
-    max_work: u64,
+    max_work: KernelWork,
     classes: u32,
     indent_heuristic: bool,
     stop: ?*const std.atomic.Value(bool) = null,
@@ -54,7 +63,8 @@ pub fn diff(
         .gpa = gpa,
         .classes = run.classes,
         .minimal = run.minimal,
-        .max_work = run.max_work,
+        // aegis: measured-boundary: docs/design.md#numeric-boundaries; validated sweep cap enters the raw one-unit search kernel.
+        .max_work = run.max_work.raw(),
         .stop = run.stop,
         .buffers = &bufs.myers,
     };

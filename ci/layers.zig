@@ -46,6 +46,8 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "workspace", .patterns = &.{
         "src/Differ.zig",
     } },
+    .{ .name = "unified writer", .patterns = &.{"src/unified.zig"} },
+    .{ .name = "diff facade", .patterns = &.{"src/diff.zig"} },
     .{ .name = "patch types", .patterns = &.{
         "src/patch/types.zig",
     } },
@@ -53,8 +55,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/patch/parse.zig",
         "src/patch/apply.zig",
     } },
-    .{ .name = "writers", .patterns = &.{
-        "src/unified.zig",
+    .{ .name = "merge writer", .patterns = &.{
         "src/merge.zig",
     } },
     .{ .name = "patches", .patterns = &.{
@@ -67,11 +68,23 @@ pub const layers: []const gantry.rules.Layer = &.{
 
 pub const entries: []const []const u8 = &.{};
 
-pub const modules: []const gantry.NamedModule = &.{};
+pub const modules: []const gantry.NamedModule = &.{
+    .{ .name = "fit", .path = "src/fit.zig" },
+    .{ .name = "cleanup", .path = "src/cleanup.zig" },
+    .{ .name = "change", .path = "src/change.zig" },
+    .{ .name = "flags", .path = "src/flags.zig" },
+    .{ .name = "parallax.diff", .path = "src/diff.zig" },
+    .{ .name = "parallax.merge", .path = "src/merge.zig" },
+    .{ .name = "parallax.patch", .path = "src/patch.zig" },
+    .{ .name = "parallax.interner", .path = "src/interner.zig" },
+    .{ .name = "parallax.lines", .path = "src/lines.zig" },
+    .{ .name = "parallax.compare", .path = "src/compare.zig" },
+};
 
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
         "std",
+        "aegis",
         "diff.corpus",
         "unified.corpus",
         "merge.corpus",
@@ -112,6 +125,7 @@ pub const required = [_][]const u8{
     "src/patch/parse.zig",
     "src/patch/apply.zig",
     "src/patch.zig",
+    "src/diff.zig",
     "src/parallax.zig",
     "src/tests.zig",
 };

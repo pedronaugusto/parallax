@@ -13,8 +13,8 @@ test "a sequence of any type diffs through the interner as lines do" {
     defer interner.deinit();
     const old = [_][]const u8{ "the", "quick", "brown", "fox", "jumps" };
     const new = [_][]const u8{ "the", "slow", "brown", "fox", "jumps", "high" };
-    var old_ids: [old.len]u32 = undefined;
-    var new_ids: [new.len]u32 = undefined;
+    var old_ids: [old.len]parallax.ClassId = undefined;
+    var new_ids: [new.len]parallax.ClassId = undefined;
     try interner.internSlice(&old, &old_ids);
     try interner.internSlice(&new, &new_ids);
     var d: parallax.Differ = .init(gpa);
@@ -34,12 +34,12 @@ test "sequences take a caller's anchors and indentation" {
     defer d.deinit();
     // The lines of the indentation-heuristic fixture, as ids: 0 "a {", 1
     // "  b", 2 "}", 3 "  c", 4 "  x".
-    const old = [_]u32{ 0, 1, 2, 0, 3, 2 };
-    const new = [_]u32{ 0, 1, 2, 0, 4, 2, 0, 3, 2 };
+    const old = [_]parallax.ClassId{ .fromRaw(0), .fromRaw(1), .fromRaw(2), .fromRaw(0), .fromRaw(3), .fromRaw(2) };
+    const new = [_]parallax.ClassId{ .fromRaw(0), .fromRaw(1), .fromRaw(2), .fromRaw(0), .fromRaw(4), .fromRaw(2), .fromRaw(0), .fromRaw(3), .fromRaw(2) };
     const indents = [_]i32{ 0, 2, 0, 2, 2 };
     const Ctx = struct {
-        fn of(ids: []const u32, i: u32) i32 {
-            return indents[ids[i]];
+        fn of(ids: []const parallax.ClassId, i: u32) i32 {
+            return indents[ids[i].raw()];
         }
         fn oldIndent(_: ?*const anyopaque, i: u32) i32 {
             return of(&old, i);
@@ -48,9 +48,9 @@ test "sequences take a caller's anchors and indentation" {
             return of(&new, i);
         }
     };
-    const heuristic = try d.sequences(&old, &new, .{ .classes = 5, .indent = .{ .old = Ctx.oldIndent, .new = Ctx.newIndent } });
+    const heuristic = try d.sequences(&old, &new, .{ .classes = .fromRaw(5), .indent = .{ .old = Ctx.oldIndent, .new = Ctx.newIndent } });
     try std.testing.expectEqualSlices(parallax.Change, &.{.{ .old_start = 3, .old_len = 0, .new_start = 3, .new_len = 3 }}, heuristic);
-    const plain = try d.sequences(&old, &new, .{ .classes = 5 });
+    const plain = try d.sequences(&old, &new, .{ .classes = .fromRaw(5) });
     try std.testing.expectEqualSlices(parallax.Change, &.{.{ .old_start = 4, .old_len = 0, .new_start = 4, .new_len = 3 }}, plain);
 }
 

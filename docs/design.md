@@ -2,7 +2,7 @@
 
 parallax computes line and sequence differences, three-way merges, inline
 refinement and unified-patch parsing and application. Production code depends
-only on std. Computation takes borrowed input and never waits on an Io or calls
+on published aegis and std. Computation takes borrowed input and never waits on an Io or calls
 an OS; writers use the caller's `std.Io.Writer`. Binary classification,
 filesystem operations, syntax trees and application policy belong to callers.
 
@@ -31,13 +31,15 @@ The public facade exports supported types without becoming their state owner.
 | Script | `script.zig` owns the borrowed `Diff` view, statistics and operation iteration. |
 | Three-way regions | `threeway.zig` solves overlapping side changes and refines or joins conflicts. |
 | Workspace | `Differ.zig` owns the allocator and retained buffers for all diff, merge and refinement calls. |
+| Unified writer | `unified.zig` renders hunks. |
+| Diff facade | `diff.zig` exports diff/refinement and workspace merge types and owns the one-shot diff convenience owner. |
 | Patch types | `patch/types.zig` owns parsed patch records, options, diagnostics and results. |
 | Patch parse and apply | `patch/parse.zig` owns syntax validation and arena-backed records; `patch/apply.zig` owns offset/fuzz search and writes applied text. |
-| Writers | `unified.zig` renders hunks; `merge.zig` renders regions and iterates marked text. |
-| Patches and public facade | `patch.zig` and `parallax.zig` expose the supported surface and convenience calls. |
+| Merge writer | `merge.zig` renders regions and iterates marked text. |
+| Patches and root facade | `patch.zig` exports patch contracts; `parallax.zig` reexports the supported concern modules. |
 
 Paths in the table are under [src](../src). Tests and fixture readers are
-separate from the production graph; shakedown and preflight are lazy test/build
+separate from the production graph; aegis owns scalar safety types, while shakedown and preflight are lazy test/build
 dependencies, not dependencies of a consumer's computation.
 
 ## Representation and lifetime
@@ -193,3 +195,59 @@ work-unit bounds and the 64 KiB deep-stack test protect algorithm behavior.
 CI compiles and smoke-runs the own benchmarks; timings are measured separately
 and never used as correctness thresholds. Architecture records owners and
 invariants here, while benchmark results remain in their dedicated evidence.
+
+## Numeric boundaries
+
+The public equivalence-class vocabulary is `ClassId` and `ClassCount` from
+published aegis id/units. It is shared across line, token and caller interning,
+so equal classes deliberately compare across both inputs; the type separates
+classes from positions, byte offsets and counts, not one interner instance
+from another. Callers still supply one shared interning domain and IDs below
+`classes`; `fromRaw` establishes representation, not membership. Runtime-safety
+builds check this existing sequence precondition before kernel entry.
+
+`Work` counts Myers sweeps; zero retains the unlimited policy. Core extracts
+the cap once and keeps the validated one-unit search loop raw. The internal
+cap widens in the same domain to u64, preserving the original run layout. `Bytes` counts
+retained storage, and `shrink` compares byte counts. Array capacity converts
+at the storage owner by actual element width. The allocator checks each
+extent before publishing capacity; disjoint live allocations cannot exceed
+the address space. Byte-only accounting therefore retains raw multiplication
+and addition inside this owner, wrapped at its declarations. Patch header
+numbers use checked multiply/add and retain the existing malformed-header
+outcome at u32 overflow. Arena cleanup and borrowed text remain with the parser.
+
+Raw forms retained at their sites have these reasons:
+
+- Measured boundary: algorithm class arrays, positions, change ranges, packed
+  counts, byte/token ends and work counters operate on inputs bounded by the
+  workspace/splitter and the sequence contract. Typed class slices are viewed
+  as u32 without copying; size/alignment are checked at compile time. The line
+  table and interner probe kernels deliberately use the same class domain.
+- No danger: `fit.resize` receives the element count of one array only. Single
+  workspace owners need no lock or secret guard; atomics only read the caller's
+  cancellation flag, whose lifetime remains the caller's contract.
+- Design removes the bug class: Reader offsets come from bounded slices and
+  patch decimal parsing uses checked arithmetic. Allocated extents and their
+  disjoint storage totals cannot overflow the address space; redundant
+  arithmetic checks in byte accounting would slow retention without adding
+  protection. Public patch ranges retain
+  their specified u32 textual representation; signed application offsets and
+  counts are widened to i64 before offset/fuzz arithmetic.
+
+No secrets, shared lock/data owners, OS boundaries or protocol state machines
+exist in the current computation package. This batch uses the
+A3 scalar contracts after their cloak adoption; it introduces no later-wave
+lifecycle/input API or future functionality.
+
+## Build modules
+
+Consumers may take `parallax.diff`, `parallax.merge`, `parallax.patch`,
+`parallax.interner`, `parallax.lines` or `parallax.compare` alone. `parallax`
+reexports these shared declarations. Merge rendering depends on the diff
+workspace and its region types; patch parsing/application depends only on
+lines, comparison and aegis. Diff depends on lines, comparison, interning,
+aegis and its existing algorithm layers. Internal storage, flags, changes and
+cleanup have one module owner and are not separately registered consumer
+modules. The source layer graph maps every named import and permits no upward
+edge; `check-consumer` proves shared identities while fetching only aegis.

@@ -15,8 +15,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const Flags = @import("flags.zig").Flags;
-const fit = @import("fit.zig");
+/// Change flags shared by the algorithm entry points.
+pub const Flags = @import("flags").Flags;
+const fit = @import("fit");
 
 /// Below this edit cost the search never gives up, however small the input.
 const max_cost_min: u64 = 256;
@@ -72,6 +73,7 @@ pub const Context = struct {
     minimal: bool,
     /// Work units before the search describes what is left coarsely; 0 is
     /// no cap.
+    // aegis: measured-boundary: docs/design.md#numeric-boundaries; core unwraps a Work cap once; the loop counts only sweeps.
     max_work: u64,
     /// Work units spent, over every search the diff makes.
     work: u64 = 0,

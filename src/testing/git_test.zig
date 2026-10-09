@@ -242,7 +242,7 @@ test "a merge of interned lines is git's line merge, region for region" {
     defer e.deinit();
     var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
     defer interner.deinit();
-    var ids: [3]std.ArrayList(u32) = .{ .empty, .empty, .empty };
+    var ids: [3]std.ArrayList(parallax.ClassId) = .{ .empty, .empty, .empty };
     defer for (&ids) |*list| list.deinit(gpa);
     var it = c.records();
     var compared: usize = 0;

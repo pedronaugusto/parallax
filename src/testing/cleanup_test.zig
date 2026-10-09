@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const parallax = @import("../parallax.zig");
-const cleanup = @import("../cleanup.zig");
+const cleanup = @import("cleanup");
 const corpus = @import("corpus.zig");
 
 const cleanup_corpus = @embedFile("cleanup.corpus");
@@ -31,7 +31,7 @@ const Chars = struct {
         while (at < text.len) {
             const end = at + (std.unicode.utf8ByteSequenceLength(text[at]) catch 1);
             try c.ends.append(gpa, @intCast(end));
-            try c.ids.append(gpa, try interner.intern(text[at..end]));
+            try c.ids.append(gpa, (try interner.intern(text[at..end])).raw());
             at = end;
         }
         return .{ .ids = c.ids.items, .text = text, .from = 0, .ends = c.ends.items };

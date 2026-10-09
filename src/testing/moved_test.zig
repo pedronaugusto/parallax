@@ -197,7 +197,7 @@ test "max_work falls back to one delete and one insert" {
     // a rotated file is then real work for Myers.
     for (0..200) |i| try old.writer.print("line {d}\n", .{i});
     for (0..200) |i| try new.writer.print("line {d}\n", .{(i + 100) % 200});
-    var capped = try parallax.diffLines(gpa, old.written(), new.written(), .{ .max_work = 1 });
+    var capped = try parallax.diffLines(gpa, old.written(), new.written(), .{ .max_work = .fromRaw(1) });
     defer capped.deinit();
     try std.testing.expectEqualSlices(Change, &.{.{ .old_start = 0, .old_len = 200, .new_start = 0, .new_len = 200 }}, capped.diff.changes);
     var full = try parallax.diffLines(gpa, old.written(), new.written(), .{});
@@ -205,13 +205,13 @@ test "max_work falls back to one delete and one insert" {
     try std.testing.expect(full.diff.changes.len > 1);
     try std.testing.expect(full.diff.stat().added < 200);
     // A cap the search never reaches leaves the script as it was.
-    var generous = try parallax.diffLines(gpa, old.written(), new.written(), .{ .max_work = 1_000_000 });
+    var generous = try parallax.diffLines(gpa, old.written(), new.written(), .{ .max_work = .fromRaw(1_000_000) });
     defer generous.deinit();
     try std.testing.expectEqualSlices(Change, full.diff.changes, generous.diff.changes);
 }
 
 test "a capped script still reproduces the new side" {
-    var d = try parallax.diffLines(std.testing.allocator, "a\nb\nc\nd\ne\nf\n", "a\nq\nc\nr\ne\ns\n", .{ .max_work = 1 });
+    var d = try parallax.diffLines(std.testing.allocator, "a\nb\nc\nd\ne\nf\n", "a\nq\nc\nr\ne\ns\n", .{ .max_work = .fromRaw(1) });
     defer d.deinit();
     try support.expectApplies(d.diff);
 }

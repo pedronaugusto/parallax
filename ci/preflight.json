@@ -3,7 +3,15 @@
     "src"
   ],
   "test_roots": [
-    "src/tests.zig"
+    "src/tests.zig",
+    "src/diff.zig",
+    "src/patch.zig",
+    "src/interner.zig",
+    "src/lines.zig",
+    "src/compare.zig",
+    "src/fit.zig",
+    "src/flags.zig",
+    "src/cleanup.zig"
   ],
   "test_support": [
     "src/testing/**"
