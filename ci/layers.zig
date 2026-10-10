@@ -1,6 +1,5 @@
 //! Source layers, lowest first. Every production source has one place.
 const gantry = @import("gantry");
-const family = @import("preflight_rules");
 
 pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "comparison, lines and flags", .patterns = &.{
@@ -75,7 +74,7 @@ pub const entries: []const []const u8 = &.{};
 pub const modules: []const gantry.NamedModule = &.{};
 
 /// Durable writes go through airlock; parallax makes none.
-pub const owned: []const gantry.rules.TokenRule = &family.durability;
+pub const owned: []const gantry.rules.TokenRule = &durability;
 
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
@@ -125,3 +124,17 @@ pub const required = [_][]const u8{
     "src/parallax.zig",
     "src/tests.zig",
 };
+
+/// Durable writes go through airlock.
+const durability = [_]gantry.rules.TokenRule{.{
+    .name = "durability belongs to airlock",
+    .sequences = &.{
+        &.{ ".", "sync", "(" },
+        &.{ ".", "syncFile", "(" },
+        &.{ ".", "syncDir", "(" },
+        &.{ "createFileAtomic", "(" },
+        &.{ "fsync", "(" },
+        &.{ "fdatasync", "(" },
+        &.{ "FlushFileBuffers", "(" },
+    },
+}};
