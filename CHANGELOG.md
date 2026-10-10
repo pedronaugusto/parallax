@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `patch.scanHunk`, `patch.HunkLines`, `patch.parseHunkHeader` and `patch.Dialect`: the grammar of one hunk on its own, for a caller that keeps the patch text and reads its own file headers. `scanHunk` checks a hunk and measures it (counts, bytes, leading and trailing context, lines added and removed) without allocating, and `HunkLines` reads its lines back. `.gnu` is the reading `parse` has always had; `.git` is `git apply`'s, with `recount` for `--recount`.
+
+### Changed
+
+- `parse` is built on the same grammar. A patch that ends inside a hunk reports the line that should have come next, where it reported the last one.
+
 ### Breaking
 
 - `Options.max_work` and `SequenceOptions.max_work` take `Work` (Myers sweeps); construct a cap with `Work.fromRaw(n)`. `Differ.shrink` takes `Bytes`, constructed with `Bytes.fromRaw(n)`.

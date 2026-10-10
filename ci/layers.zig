@@ -51,6 +51,9 @@ pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "patch types", .patterns = &.{
         "src/patch/types.zig",
     } },
+    .{ .name = "patch hunks", .patterns = &.{
+        "src/patch/hunk.zig",
+    } },
     .{ .name = "patch parse and apply", .patterns = &.{
         "src/patch/parse.zig",
         "src/patch/apply.zig",

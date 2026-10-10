@@ -5,6 +5,7 @@
 //! verbatim for a caller that layers them.
 
 const types = @import("patch/types.zig");
+const hunk = @import("patch/hunk.zig");
 
 /// One line of a hunk: context, removed or added.
 pub const Line = types.Line;
@@ -28,11 +29,28 @@ pub const Rejects = types.Rejects;
 pub const HunkResult = types.HunkResult;
 /// Why `apply` stopped.
 pub const ApplyError = types.ApplyError;
+/// Whose reading of a hunk: GNU patch's or `git apply`'s.
+pub const Dialect = hunk.Dialect;
+/// An `@@` line's ranges and heading.
+pub const HunkHeader = hunk.Header;
+/// A hunk's header line, or null when it is none.
+pub const parseHunkHeader = hunk.parseHeader;
+/// How `scanHunk` reads: the dialect, `--recount`, where a refusal stopped.
+pub const HunkScanOptions = hunk.ScanOptions;
+/// What `scanHunk` measured: the header, the extent, the context around the changes.
+pub const HunkScan = hunk.Scan;
+/// Why a hunk is refused.
+pub const HunkScanError = types.ScanError;
+/// Check the hunk at the start of a text and measure it, allocating nothing.
+pub const scanHunk = hunk.scan;
+/// The lines of a scanned hunk, one at a time, allocating nothing.
+pub const HunkLines = hunk.HunkLines;
 /// Read a unified patch. The result borrows the text.
 pub const parse = @import("patch/parse.zig").parse;
 /// Write a text with one file's hunks applied.
 pub const apply = @import("patch/apply.zig").apply;
 
 test {
+    _ = @import("patch/hunk.zig");
     _ = @import("patch/parse.zig");
 }

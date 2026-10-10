@@ -3,12 +3,12 @@
 //! copied; the parse is one pass, linear in the text.
 
 const std = @import("std");
-const aegis = @import("aegis");
 const Allocator = std.mem.Allocator;
 const types = @import("types.zig");
 const Line = types.Line;
 const Hunk = types.Hunk;
 const File = types.File;
+const hunk_mod = @import("hunk.zig");
 
 /// The lines of the patch, each with its newline.
 // aegis: design: docs/design.md#numeric-boundaries; Reader offsets advance only through bounded slices, while header arithmetic is checked separately.
@@ -113,80 +113,32 @@ const Parser = struct {
     }
 
     fn hunk(p: *Parser) types.ParseError!Hunk {
-        const head = chomp(p.reader.next().?);
-        var h = parseHead(head) orelse return p.fail(error.InvalidHunkHeader, "a hunk header is not @@ -a,b +c,d @@");
-        var lines: std.ArrayList(Line) = .empty;
-        var old_seen: u64 = 0;
-        var new_seen: u64 = 0;
-        while (old_seen < h.old_len or new_seen < h.new_len) {
-            const line = p.reader.next() orelse return p.fail(error.HunkLengthMismatch, "the patch ends inside a hunk");
-            const kind: Line.Kind, const text = switch (line[0]) {
-                ' ' => .{ .context, line[1..] },
-                '-' => .{ .removed, line[1..] },
-                '+' => .{ .added, line[1..] },
-                // A context line whose space was eaten, as GNU patch takes it.
-                '\n', '\t' => .{ .context, line },
-                '\\' => {
-                    if (!markNoNewline(&lines)) return p.fail(error.UnexpectedLine, "a no-newline marker with no line before it");
-                    continue;
-                },
-                else => return p.fail(error.UnexpectedLine, "a line in a hunk starts with none of ' ', '-', '+' or '\\'"),
-            };
-            if (kind != .added) old_seen += 1;
-            if (kind != .removed) new_seen += 1;
-            if (old_seen > h.old_len or new_seen > h.new_len) return p.fail(error.HunkLengthMismatch, "a hunk holds more lines than its header says");
-            try lines.append(p.arena, .{ .kind = kind, .text = text, .no_newline = text.len == 0 or text[text.len - 1] != '\n' });
-        }
-        if (p.reader.peek()) |line| if (line[0] == '\\') {
-            _ = p.reader.next();
-            _ = markNoNewline(&lines);
+        const rest = p.reader.text[p.reader.at..];
+        var diagnostics: types.Diagnostics = .{};
+        const scanned = hunk_mod.scan(rest, .{ .dialect = .gnu, .diagnostics = &diagnostics }) catch |err| {
+            p.reader.number += diagnostics.line;
+            return p.fail(switch (err) {
+                error.HunkWithoutChange => unreachable, // unreachable: only the git reading refuses a hunk for changing nothing
+                error.InvalidHunkHeader, error.HunkLengthMismatch, error.UnexpectedLine => |e| e,
+            }, diagnostics.message);
         };
+        var h: Hunk = .{
+            .old_start = scanned.header.old_start,
+            .old_len = scanned.header.old_len,
+            .new_start = scanned.header.new_start,
+            .new_len = scanned.header.new_len,
+            .heading = scanned.header.heading,
+            .lines = &.{},
+        };
+        var lines: std.ArrayList(Line) = .empty;
+        var it: hunk_mod.HunkLines = .init(rest[hunk_mod.lineLength(rest)..scanned.consumed], .gnu);
+        while (it.next()) |line| try lines.append(p.arena, line);
         h.lines = try lines.toOwnedSlice(p.arena);
+        p.reader.at += scanned.consumed;
+        p.reader.number += scanned.lines;
         return h;
     }
 };
-
-fn markNoNewline(lines: *std.ArrayList(Line)) bool {
-    if (lines.items.len == 0) return false;
-    const last = &lines.items[lines.items.len - 1];
-    if (last.text.len != 0 and last.text[last.text.len - 1] == '\n') last.text = last.text[0 .. last.text.len - 1];
-    last.no_newline = true;
-    return true;
-}
-
-/// `@@ -a[,b] +c[,d] @@[ heading]`; null when it is not one.
-fn parseHead(head: []const u8) ?Hunk {
-    var at: usize = "@@ -".len;
-    const old = range(head, &at) orelse return null;
-    if (!std.mem.startsWith(u8, head[at..], " +")) return null;
-    at += 2;
-    const new = range(head, &at) orelse return null;
-    if (!std.mem.startsWith(u8, head[at..], " @@")) return null;
-    at += 3;
-    var heading = head[at..];
-    if (heading.len != 0 and heading[0] == ' ') heading = heading[1..] else if (heading.len != 0 and heading[0] != '\r') return null;
-    if (heading.len != 0 and heading[heading.len - 1] == '\r') heading = heading[0 .. heading.len - 1];
-    return .{ .old_start = old[0], .old_len = old[1], .new_start = new[0], .new_len = new[1], .heading = heading, .lines = &.{} };
-}
-
-fn range(head: []const u8, at: *usize) ?[2]u32 {
-    const start = number(head, at) orelse return null;
-    if (at.* < head.len and head[at.*] == ',') {
-        at.* += 1;
-        return .{ start, number(head, at) orelse return null };
-    }
-    return .{ start, 1 };
-}
-
-fn number(head: []const u8, at: *usize) ?u32 {
-    var value: aegis.int.Checked(u32) = .init(0);
-    const from = at.*;
-    while (at.* < head.len and std.ascii.isDigit(head[at.*])) : (at.* += 1) {
-        value = (value.mul(10) catch return null).add(head[at.*] - '0') catch return null;
-    }
-    if (at.* == from) return null;
-    return value.raw();
-}
 
 /// Read a unified patch. The result borrows `text`.
 pub fn parse(gpa: Allocator, text: []const u8, options: types.ParseOptions) types.ParseError!types.Patch {
@@ -250,17 +202,10 @@ test "a git patch: header lines, names, hunks, headings and the no-newline marke
 test "a malformed hunk says what and where" {
     var diagnostics: types.Diagnostics = .{};
     try std.testing.expectError(error.HunkLengthMismatch, parse(std.testing.allocator, "--- a\n+++ b\n@@ -1,3 +1,2 @@\n a\n-b\n+c\n", .{ .diagnostics = &diagnostics }));
-    try std.testing.expectEqual(@as(u32, 6), diagnostics.line);
+    // The line after the last, where the hunk wanted another.
+    try std.testing.expectEqual(@as(u32, 7), diagnostics.line);
     try std.testing.expectError(error.InvalidHunkHeader, parse(std.testing.allocator, "--- a\n+++ b\n@@ -x +1 @@\n", .{ .diagnostics = &diagnostics }));
     try std.testing.expectEqual(@as(u32, 3), diagnostics.line);
     try std.testing.expectError(error.UnexpectedLine, parse(std.testing.allocator, "--- a\n+++ b\n@@ -1 +1 @@\n*a\n", .{ .diagnostics = &diagnostics }));
     try std.testing.expectError(error.HunkLengthMismatch, parse(std.testing.allocator, "--- a\n+++ b\n@@ -1 +1 @@\n-a\n-b\n", .{}));
-}
-
-test "checked patch header numbers accept u32 maximum and reject decimal overflow" {
-    const largest = parseHead("@@ -4294967295,0 +4294967295,0 @@").?;
-    try std.testing.expectEqual(std.math.maxInt(u32), largest.old_start);
-    try std.testing.expect(parseHead("@@ -4294967296,0 +1,0 @@") == null);
-    try std.testing.expect(parseHead("@@ -1,0 +99999999999999999999999,0 @@") == null);
-    try std.testing.expect(parseHead("@@ -1,4294967296 +1,0 @@") == null);
 }

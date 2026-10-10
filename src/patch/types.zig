@@ -66,6 +66,19 @@ pub const ParseOptions = struct {
     diagnostics: ?*Diagnostics = null,
 };
 
+/// Why a hunk is refused.
+pub const ScanError = error{
+    /// The `@@` line is none.
+    InvalidHunkHeader,
+    /// The lines are more or fewer than the counts say, or the text ends first.
+    HunkLengthMismatch,
+    /// A line begins with what no hunk line begins with.
+    UnexpectedLine,
+    /// A hunk with nothing added or removed: `git apply` refuses it unless
+    /// the counts are taken from its lines.
+    HunkWithoutChange,
+};
+
 pub const ParseError = error{ OutOfMemory, InvalidHunkHeader, HunkLengthMismatch, UnexpectedLine };
 
 pub const Rejects = enum {

@@ -171,7 +171,20 @@ Parsing owns arena-backed file, hunk and line records and borrows their text
 from the caller. It retains extended headers verbatim for callers to interpret,
 including header-only sections. Hunk counts are checked, omitted counts mean
 one, and missing-newline markers annotate the preceding line. Diagnostics name
-the failing input line; malformed syntax returns a named parse error.
+the failing input line, which for a patch that ends inside a hunk is the one that
+should have followed; malformed syntax returns a named parse error.
+
+The grammar of one hunk, `patch/hunk.zig`, is the owner of every hunk read here and
+of any a caller reads with `scanHunk` and `HunkLines`: the header's ranges, the
+lines the counts bound, and the markers. A scan walks the hunk once, allocating
+nothing, and measures it; the lines are read back on demand, so a caller that keeps
+a large patch's text pays nothing per line. Two dialects share it. GNU patch's is
+lenient where mail and editors damage a patch (a line led by a tab or a newline is
+context, any `\` line marks the line before it, a hunk may be context alone). git's
+is `git apply`'s rule for rule: every line of a hunk ends in a newline, the counts
+decide where it ends, a marker is the one line right after a line, a hunk that
+changes nothing is refused, and `recount` takes the counts from the lines. The
+two differ at those points only; the ranges, counts and markers are read once.
 
 Application owns temporary line/hash/search storage and streams to the caller's
 writer. Hunks apply in order without overlap. Search starts at the stated line

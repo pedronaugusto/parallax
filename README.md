@@ -216,6 +216,15 @@ lines its header counts, or the parse stops with `error.HunkLengthMismatch` and
 `Diagnostics` says on which line. `\ No newline at end of file` marks the line
 before it; a carriage return stays in a line's text.
 
+A caller that keeps the patch text and reads its own file headers, as `git apply`
+does, takes the hunks alone. `patch.scanHunk` checks the hunk at the start of a text
+and measures it without allocating (its counts, the bytes it holds, the context lines
+around its changes), and `patch.HunkLines` reads its lines back one at a time. Both
+read either dialect: `.gnu` is the reading `parse` uses, and `.git` is `git apply`'s,
+which ends a hunk where its counts do, takes a `\ No newline` marker only right after
+a line, refuses a line that begins with a tab and a hunk that changes nothing, and with
+`recount` takes the counts from the lines instead.
+
 `patch.apply` writes the base with one file's hunks applied, by GNU patch's
 rules. Hunks apply in order, each after the end of the one before. A hunk is
 looked for at its stated line plus the offset the hunks before it found, then
@@ -272,6 +281,8 @@ marker alone on its line, which `write` writes for an empty label.
 | `merge.parseMarkers(text, options)` | The text and conflicts of marked text, one part at a time |
 | `patch.parse(gpa, text, options)` | The files and hunks of a unified patch, borrowing the text |
 | `patch.apply(gpa, w, base, file, options, results)` | The base with one file's hunks applied, and each hunk's result |
+| `patch.scanHunk(text, options)` | One hunk checked and measured in place, in either dialect |
+| `patch.HunkLines` | The lines of a scanned hunk, one at a time, allocating nothing |
 
 Every input is under 4 GiB, and the inputs of one call hold fewer than 2^32 lines
 between them; anything larger is `error.InputTooLarge`. Past that, a diff, merge
