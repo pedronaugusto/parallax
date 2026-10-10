@@ -3,6 +3,7 @@
 //! copied; the parse is one pass, linear in the text.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const Allocator = std.mem.Allocator;
 const types = @import("types.zig");
 const Line = types.Line;
@@ -135,7 +136,7 @@ const Parser = struct {
         while (it.next()) |line| try lines.append(p.arena, line);
         h.lines = try lines.toOwnedSlice(p.arena);
         p.reader.at += scanned.consumed;
-        p.reader.number += std.math.cast(u32, scanned.lines) orelse return p.fail(error.HunkLengthMismatch, "a hunk too long to number its lines");
+        p.reader.number += aegis.int.cast(u32, scanned.lines) catch return p.fail(error.HunkLengthMismatch, "a hunk too long to number its lines");
         return h;
     }
 };
