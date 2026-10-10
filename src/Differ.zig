@@ -8,6 +8,7 @@
 const Differ = @This();
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const compare_mod = @import("compare.zig");
 const Compare = compare_mod.Compare;
@@ -131,8 +132,7 @@ pub fn shrink(d: *Differ, keep: Bytes) void {
             sum.* = fit.add(sum.*, fit.bytes(list));
         }
     }.f);
-    // aegis: no-danger: docs/design.md#numeric-boundaries; both operands are Bytes; aegis has no typed ordering operation.
-    if (total.raw() <= keep.raw()) return;
+    if (total.compare(keep) != .gt) return;
     d.eachList(d.gpa, struct {
         fn f(gpa: Allocator, list: anytype) void {
             list.clearAndFree(gpa);
@@ -235,7 +235,7 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
     d.work = try core.diff(core.LineSource, d.gpa, source, &d.scratch, d.ids.items[0..n_old], d.ids.items[n_old..], .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
-        .max_work = options.max_work.convert(u64) catch @panic("u32 work cap must fit u64"),
+        .max_work = options.max_work.convert(u64),
         .classes = classes,
         .indent_heuristic = options.indent_heuristic,
         .stop = options.stop,
@@ -253,15 +253,16 @@ pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const cl
     d.work = 0;
     d.changes.clearRetainingCapacity();
     if (@as(u64, old.len) + new.len > std.math.maxInt(u32)) return error.InputTooLarge;
-    if (std.debug.runtime_safety) {
-        for (old) |id| std.debug.assert(id < options.classes.raw());
-        for (new) |id| std.debug.assert(id < options.classes.raw());
+    if (builtin.mode.runtimeSafety()) {
+        const bound = class.ClassId.fromRaw(options.classes.raw());
+        for (old_ids) |id| std.debug.assert(id.compare(bound) == .lt);
+        for (new_ids) |id| std.debug.assert(id.compare(bound) == .lt);
     }
     if (std.mem.eql(u32, old, new)) return d.changes.items;
     d.work = try core.diff(core.SequenceSource, d.gpa, .{ .anchor_fn = options.anchor, .indent_fn = options.indent }, &d.scratch, old, new, .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
-        .max_work = options.max_work.convert(u64) catch @panic("u32 work cap must fit u64"),
+        .max_work = options.max_work.convert(u64),
         .classes = options.classes.raw(),
         .indent_heuristic = options.indent != null,
         .stop = options.stop,
@@ -344,8 +345,9 @@ pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []co
     const regions = &d.merge_buffers.regions;
     regions.clearRetainingCapacity();
     if (@as(u64, base.len) + ours.len + theirs.len > std.math.maxInt(u32)) return error.InputTooLarge;
-    if (std.debug.runtime_safety) {
-        for ([_][]const u32{ base, ours, theirs }) |side| for (side) |id| std.debug.assert(id < options.classes.raw());
+    if (builtin.mode.runtimeSafety()) {
+        const bound = class.ClassId.fromRaw(options.classes.raw());
+        for ([_][]const class.ClassId{ base_ids, our_ids, their_ids }) |side| for (side) |id| std.debug.assert(id.compare(bound) == .lt);
     }
     const lens: [3]u32 = .{ @intCast(base.len), @intCast(ours.len), @intCast(theirs.len) };
     if (std.mem.eql(u32, ours, theirs)) {

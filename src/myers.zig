@@ -406,8 +406,10 @@ fn Search(comptime Int: type) type {
                     s.markB(off2, l2);
                     continue;
                 }
-                assert(off1 <= split.i1 and split.i1 <= l1);
-                assert(off2 <= split.i2 and split.i2 <= l2);
+                assert(off1 <= split.i1);
+                assert(split.i1 <= l1);
+                assert(off2 <= split.i2);
+                assert(split.i2 <= l2);
                 // The upper half goes on first, so the lower one is done
                 // first, as git's recursion does it.
                 try stack.append(gpa, .{ .off1 = split.i1, .lim1 = l1, .off2 = split.i2, .lim2 = l2, .need_min = split.min_hi });

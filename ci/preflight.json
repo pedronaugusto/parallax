@@ -3,7 +3,8 @@
     "src"
   ],
   "test_roots": [
-    "src/tests.zig"
+    "src/tests.zig",
+    "bench/baseline/diff/textdiff.zig"
   ],
   "test_support": [
     "src/testing/**"
@@ -43,7 +44,6 @@
       ]
     }
   },
-  "ziglint_exceptions": "ci/ziglint-exceptions.json",
   "extra_checks": [
     [
       "zig",
@@ -56,9 +56,6 @@
       "check-freestanding"
     ]
   ],
-  "unreachable_exceptions": "ci/unreachable-exceptions.json",
-  "debug_print_exceptions": "ci/debug-print-exceptions.json",
-  "file_name_exceptions": "ci/file-name-exceptions.json",
   "test_dependencies": [
     "shakedown"
   ],
@@ -73,6 +70,10 @@
     "rules": [
       {
         "id": "A004",
+        "level": "gate"
+      },
+      {
+        "id": "Z026",
         "level": "gate"
       }
     ],

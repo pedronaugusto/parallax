@@ -42,7 +42,6 @@ pub const Heading = struct {
     }
 };
 
-// aegis: no-danger: docs/design.md#numeric-boundaries; both context values count only lines, thresholds widen to u64 and ranges clamp to each bounded file.
 pub const HunkOptions = struct {
     /// Lines of context on each side of a change.
     context: u32 = 3,

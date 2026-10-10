@@ -88,7 +88,6 @@ pub const Rejects = enum {
     skip,
 };
 
-// aegis: no-danger: docs/design.md#numeric-boundaries; fuzz and offsets count only lines, and offset/search arithmetic widens to i64 before bounding against the input.
 pub const ApplyOptions = struct {
     /// GNU patch's fuzz factor: how many leading and trailing context lines
     /// a hunk may ignore when it does not match as it stands (0 is exact).

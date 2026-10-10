@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use published aegis for equivalence-class IDs/counts, work caps, typed scratch byte accounting and patch header integers; retain compact raw kernels behind explicit boundaries.
 - Expose the diff, merge, patch, interner, lines and comparison concerns as namespaces of the one module (`parallax.diff`, `.merge`, `.patch`, `.interner`, `.lines`, `.compare`), each declaration with one owner; the root reexports the types most callers want.
-- Pin green published aegis a5d17d0, preflight c04e49d and shakedown 99418ac; regenerate CI from the pinned preflight.
+- Pin the newest green aegis, preflight and shakedown; regenerate CI from the pinned preflight.
+- CI gates glint's A004 (raw aegis scalar operations) and Z026 (a discarded error) through the `glint` object of `ci/preflight.json`; the retired exception files are gone. `Differ` orders sizes and class ids through aegis `compare`, and checks its sequence bound in safe builds through `builtin.mode.runtimeSafety()`.
+- The benchmark baseline's 25 tests run with the rest in a `baseline-tests` root.
 
 - Property tests use shakedown generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; allocation failure sweeps use its NoResize allocator and repeated fixtures use its corpus helpers.
 - Consume shakedown unchanged from its upstream module, including its 32-bit generator fixes.

@@ -141,7 +141,7 @@ pub fn diffOne(_: void, case: *shakedown.Case) !void {
     whole.function_context = .c_function;
     try expectHunks(diff, whole);
     if (o.stop != null) return;
-    if (o.max_work.raw() == 0 and !o.minimal) {
+    if (o.max_work.eql(.fromRaw(0)) and !o.minimal) {
         const plain = diff.stat();
         var exact = o;
         exact.minimal = true;

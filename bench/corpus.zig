@@ -65,6 +65,7 @@ const Blobs = struct {
     fn stop(b: *Blobs, io: Io) void {
         b.child.stdin.?.close(io);
         b.child.stdin = null;
+        // glint-ignore: Z026 -- teardown of a bench helper whose stdin is closed; a wait that fails leaves a child the run ends with anyway
         _ = b.child.wait(io) catch {};
     }
 
@@ -183,7 +184,7 @@ fn collect(init: std.process.Init, args: []const []const u8) !void {
     const dots = std.mem.find(u8, range, "..") orelse return error.BadRange;
     var ends: [2][]const u8 = undefined;
     for (&ends, [_][]const u8{ range[0..dots], range[dots + 2 ..] }) |*end, name| {
-        const spec = try std.fmt.allocPrint(arena, "{s}^{{commit}}", .{name});
+        const spec = try arena.print("{s}^{{commit}}", .{name});
         const out = try git.run(&.{ "rev-parse", spec });
         end.* = try arena.dupe(u8, std.mem.trimEnd(u8, out, "\n"));
         gpa.free(out);
@@ -272,7 +273,7 @@ fn collect(init: std.process.Init, args: []const []const u8) !void {
     const merges_hash = try merges.close(io);
     say(io, "{d} triples from {d} merges, {d} MB\n", .{ merges.count, merge_commits, merges.bytes / 1_000_000 });
 
-    const manifest = try std.fmt.allocPrint(arena,
+    const manifest = try arena.print(
         \\parallax bench corpus 1
         \\range: {s}
         \\from: {s}

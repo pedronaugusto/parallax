@@ -48,8 +48,20 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addAnonymousImport("gen", .{ .root_source_file = b.path("bench/gen.zig") });
     const test_step = b.step("test", "Run the tests and example");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+    // The benchmark baseline is code with tests of its own; its root runs them.
+    const baseline_tests = b.addTest(.{
+        .name = "baseline-tests",
+        .filters = if (b.option([]const u8, "baseline-filter", "Select baseline tests by name")) |filter| &.{filter} else &.{},
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("bench/baseline/diff/textdiff.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(baseline_tests).step);
     const check = b.step("check", "Compile the tests, library, example and benchmarks without running them");
     check.dependOn(&tests.step);
+    check.dependOn(&baseline_tests.step);
     const example = b.addExecutable(.{
         .name = "usage",
         .root_module = b.createModule(.{ .root_source_file = b.path("examples/usage.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "parallax", .module = module }} }),

@@ -173,7 +173,7 @@ pub fn main(init: std.process.Init) !void {
     if (config.wants("W5")) try small(r, gpa, config);
     if (config.wants("W6")) try whitespace(r, gpa, &d, config, large);
     if (config.wants("W7")) try merges(r, gpa, &d, config);
-    if (config.wants("W8")) try inline_(r, gpa, &d, config, large);
+    if (config.wants("W8")) try refineInline(r, gpa, &d, config, large);
     if (config.wants("W9")) try patches(r, gpa, config);
     if (config.wants("W10")) try functions(r, gpa, &d, config);
 }
@@ -223,7 +223,7 @@ fn pair(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, name: []
         const ours = try timeLines(r, d, config, p, .{ .algorithm = algorithm });
         const base = try timeBaseline(r, gpa, config, p, .{ .algorithm = baselineAlgorithm(algorithm) });
         var label_buf: [64]u8 = undefined;
-        const label = try std.fmt.bufPrint(&label_buf, "{t}", .{algorithm});
+        const label = try std.mem.print(&label_buf, "{t}", .{algorithm});
         try r.line(name, label, "parallax", ours / 1e6, "ms");
         try r.line(name, label, "baseline", base / 1e6, "ms");
         try r.line(name, label, "throughput", mb / (ours / 1e9), "MB/s");
@@ -357,7 +357,7 @@ fn crlf(gpa: Allocator, text: []const u8) ![]u8 {
 }
 
 /// W8: every replace of W2 at 10% refined by words and by characters.
-fn inline_(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines: usize) !void {
+fn refineInline(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines: usize) !void {
     const p = try gen.w2(gpa, lines, 0.1);
     defer p.deinit(gpa);
     var e: parallax.Differ = .init(gpa);
@@ -382,9 +382,9 @@ fn inline_(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines
         }
         var label_buf: [32]u8 = undefined;
         const label = if (cleanup == .none)
-            try std.fmt.bufPrint(&label_buf, "{t}", .{tokens})
+            try std.mem.print(&label_buf, "{t}", .{tokens})
         else
-            try std.fmt.bufPrint(&label_buf, "{t} {t}", .{ tokens, cleanup });
+            try std.mem.print(&label_buf, "{t} {t}", .{ tokens, cleanup });
         try r.line("W8", label, "per change", best / @as(f64, @floatFromInt(@max(replaces, 1))) / 1e3, "us");
         try r.line("W8", label, "throughput", @as(f64, @floatFromInt(bytes)) / 1e6 / (best / 1e9), "MB/s");
     };
@@ -428,7 +428,7 @@ fn merges(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void 
                 if (run != 0) base_best = @min(base_best, ns(t0, t1));
             }
             var label_buf: [32]u8 = undefined;
-            const label = try std.fmt.bufPrint(&label_buf, "{t}", .{style});
+            const label = try std.mem.print(&label_buf, "{t}", .{style});
             try r.line(case.name, label, "parallax", best / 1e6, "ms");
             try r.line(case.name, label, "baseline", base_best / 1e6, "ms");
             try r.line(case.name, label, "A/B", base_best / best, "x");
@@ -593,7 +593,7 @@ const Records = struct {
 
     fn open(rec: *Records, io: Io, dir: []const u8, name: []const u8) !void {
         var path_buffer: [4096]u8 = undefined;
-        const path = try std.fmt.bufPrint(&path_buffer, "{s}/{s}", .{ dir, name });
+        const path = try std.mem.print(&path_buffer, "{s}/{s}", .{ dir, name });
         rec.file = try Io.Dir.cwd().openFile(io, path, .{});
         rec.reader = rec.file.readerStreaming(io, &rec.buffer);
     }
@@ -620,7 +620,7 @@ const Records = struct {
 /// The corpus in `dir` is the one the committed manifest names.
 fn checkCorpus(gpa: Allocator, io: Io, dir: []const u8) !void {
     var path_buffer: [4096]u8 = undefined;
-    const path = try std.fmt.bufPrint(&path_buffer, "{s}/manifest", .{dir});
+    const path = try std.mem.print(&path_buffer, "{s}/manifest", .{dir});
     const manifest = try Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
     defer gpa.free(manifest);
     if (!std.mem.eql(u8, manifest, @embedFile("linux-v6.11-v6.12.manifest"))) return error.CorpusMismatch;
@@ -693,7 +693,7 @@ fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !voi
             }
         }
         var label_buf: [32]u8 = undefined;
-        const label = try std.fmt.bufPrint(&label_buf, "{t}", .{algorithm});
+        const label = try std.mem.print(&label_buf, "{t}", .{algorithm});
         for ([_][]const u8{ "W4", "W4L" }, 0..) |name, k| {
             try r.line(name, label, "parallax", best[k] / 1e6, "ms");
             try r.line(name, label, "baseline", base_best[k] / 1e6, "ms");

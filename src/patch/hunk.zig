@@ -84,6 +84,7 @@ fn number(head: []const u8, at: *usize, limit: u64) ?u64 {
     const from = at.*;
     while (at.* < head.len and std.ascii.isDigit(head[at.*])) : (at.* += 1) {
         value = (value.mul(10) catch return null).add(head[at.*] - '0') catch return null;
+        // glint-ignore: A004 -- no-danger: docs/design.md#numeric-boundaries; a parsed header number against the header's own bound, plain text quantities with no domain or unit to keep
         if (value.raw() > limit) return null;
     }
     if (at.* == from) return null;

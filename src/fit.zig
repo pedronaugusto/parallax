@@ -9,7 +9,6 @@ const Allocator = std.mem.Allocator;
 /// Retained storage in bytes, distinct from element and work counts.
 pub const Bytes = aegis.units.Bytes(usize);
 
-/// aegis: no-danger: docs/design.md#numeric-boundaries; this argument is only an element count for one array, never a byte count.
 /// `list` resized to `n` items, its capacity no more than that when it has
 /// to grow.
 pub fn resize(gpa: Allocator, list: anytype, n: usize) Allocator.Error!void {
