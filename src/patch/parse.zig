@@ -123,10 +123,10 @@ const Parser = struct {
             }, diagnostics.message);
         };
         var h: Hunk = .{
-            .old_start = scanned.header.old_start,
-            .old_len = scanned.header.old_len,
-            .new_start = scanned.header.new_start,
-            .new_len = scanned.header.new_len,
+            .old_start = narrow(scanned.header.old_start),
+            .old_len = narrow(scanned.header.old_len),
+            .new_start = narrow(scanned.header.new_start),
+            .new_len = narrow(scanned.header.new_len),
             .heading = scanned.header.heading,
             .lines = &.{},
         };
@@ -135,10 +135,15 @@ const Parser = struct {
         while (it.next()) |line| try lines.append(p.arena, line);
         h.lines = try lines.toOwnedSlice(p.arena);
         p.reader.at += scanned.consumed;
-        p.reader.number += scanned.lines;
+        p.reader.number += std.math.cast(u32, scanned.lines) orelse return p.fail(error.HunkLengthMismatch, "a hunk too long to number its lines");
         return h;
     }
 };
+
+/// A header number the gnu reading has already held under 2^32.
+fn narrow(value: u64) u32 {
+    return @intCast(value); // safe: the gnu reading refuses a header number above u32's maximum
+}
 
 /// Read a unified patch. The result borrows `text`.
 pub fn parse(gpa: Allocator, text: []const u8, options: types.ParseOptions) types.ParseError!types.Patch {
