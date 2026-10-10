@@ -413,31 +413,6 @@ test "the failing line is the one refused, or the one that never came" {
     try std.testing.expectEqual(@as(u32, 1), d.line);
 }
 
-test "fuzz: any text scans or is refused by name, and what scans reads back" {
-    try std.testing.fuzz({}, struct {
-        fn run(_: void, input: *std.testing.Smith) anyerror!void {
-            var buffer: [256]u8 = undefined;
-            const len = input.slice(&buffer);
-            const text = buffer[0..len];
-            inline for (.{ Dialect.gnu, Dialect.git }) |dialect| {
-                for ([_]bool{ false, true }) |recounted| {
-                    const s = scan(text, .{ .dialect = dialect, .recount = recounted }) catch continue;
-                    try std.testing.expect(s.consumed <= text.len);
-                    var it: HunkLines = .init(text[lineLength(text)..s.consumed], dialect);
-                    var old: u64 = 0;
-                    var new: u64 = 0;
-                    while (it.next()) |line| {
-                        if (line.kind != .added) old += 1;
-                        if (line.kind != .removed) new += 1;
-                    }
-                    try std.testing.expectEqual(s.header.old_len, old);
-                    try std.testing.expectEqual(s.header.new_len, new);
-                }
-            }
-        }
-    }.run, .{});
-}
-
 test "a scan says which kinds of line end in CR LF, and a marker takes a line's newline" {
     const s = try scan("@@ -1,2 +1,2 @@\n a\r\n-b\n+c\r\n d\n", .{});
     try std.testing.expect(s.crlf.context);

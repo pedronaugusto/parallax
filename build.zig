@@ -28,8 +28,12 @@ pub fn build(b: *std.Build) void {
     tests.root_module.addImport("aegis", aegis);
     // Keep configuring on the initial fetch pass so preflight declares
     // every -D option before Zig validates it.
-    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize }) catch null;
-    if (shakedown) |dependency| tests.root_module.addImport("shakedown", dependency.module("shakedown"));
+    // Bound to this package's aegis, so one aegis is linked.
+    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer }) catch null;
+    if (shakedown) |dependency| {
+        if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(dependency, aegis);
+        tests.root_module.addImport("shakedown", dependency.module("shakedown"));
+    }
     // The references' output, captured once, as data: git's, GNU patch's
     // and the reference's.
     for ([_][]const u8{
@@ -153,10 +157,16 @@ pub fn build(b: *std.Build) void {
 }
 
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
-    return b.allocator.dupe(std.Build.Module.Import, &.{.{
-        .name = "parallax",
-        .module = computationModule(b, target, optimize),
-    }}) catch @panic("out of memory");
+    // The benchmark harness is shakedown's; it is bound to this package's
+    // aegis, so one aegis is linked.
+    const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
+    // unreachable: `build` asks for preflight only once shakedown is there.
+    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer }) catch unreachable;
+    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown, aegis);
+    return b.allocator.dupe(std.Build.Module.Import, &.{
+        .{ .name = "parallax", .module = computationModule(b, target, optimize) },
+        .{ .name = "shakedown", .module = shakedown.module("shakedown") },
+    }) catch @panic("out of memory");
 }
 
 /// The library for a target, for what builds against it apart from the

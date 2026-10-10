@@ -103,6 +103,53 @@ test "parse takes any bytes, on seeded inputs" {
     try shakedown.check(std.testing.allocator, {}, support.parseOne, .{ .seed = 0x70617273, .cases = 3000 });
 }
 
+/// Hunk-shaped bytes, and any bytes among them: a text scans or is refused
+/// by name, and what scans reads back with the counts its header holds.
+fn hunkOne(_: void, case: *shakedown.Case) !void {
+    const gen = shakedown.gen;
+    const s = case.source;
+    const syntax = [_][]const u8{
+        "@@ -1,2 +1,2 @@\n", "@@ -1 +1 @@\n", "@@ -0,0 +1 @@ h\n", "@@ -1,3 +1 @@\n", " a\n", "-b\n", "+c\n", " a\r\n", "\\ No newline at end of file\n", "\\ No\n", "\n", "@@", "*b\n",
+    };
+    const fragments = try gen.slice(s, []const u8, struct {
+        fn draw(source: *shakedown.Source) []const u8 {
+            return gen.oneOf(source, []const u8, &syntax);
+        }
+    }.draw, case.gpa, .{ .average = 12, .max_len = 64 });
+    var buffer: [512]u8 = undefined;
+    var len: usize = 0;
+    for (fragments) |piece| {
+        if (len + piece.len > buffer.len) break;
+        @memcpy(buffer[len..][0..piece.len], piece);
+        len += piece.len;
+    }
+    // And bytes of any kind after them.
+    const tail = gen.intRange(s, usize, 0, @min(32, buffer.len - len));
+    s.bytes(buffer[len..][0..tail]);
+    len += tail;
+    const text = buffer[0..len];
+    const header_end = if (std.mem.findScalar(u8, text, '\n')) |nl| nl + 1 else text.len;
+    inline for (.{ parallax.patch.Dialect.gnu, parallax.patch.Dialect.git }) |dialect| {
+        for ([_]bool{ false, true }) |recounted| {
+            const scanned = parallax.patch.scanHunk(text, .{ .dialect = dialect, .recount = recounted }) catch continue;
+            try std.testing.expect(scanned.consumed <= text.len);
+            var it: parallax.patch.HunkLines = .init(text[header_end..scanned.consumed], dialect);
+            var old: u64 = 0;
+            var new: u64 = 0;
+            while (it.next()) |line| {
+                if (line.kind != .added) old += 1;
+                if (line.kind != .removed) new += 1;
+            }
+            try std.testing.expectEqual(scanned.header.old_len, old);
+            try std.testing.expectEqual(scanned.header.new_len, new);
+        }
+    }
+}
+
+test "any text scans as a hunk or is refused by name, and what scans reads back" {
+    try shakedown.check(std.testing.allocator, {}, hunkOne, .{});
+}
+
 test "a base shifted by inserted lines applies with that offset" {
     const gpa = std.testing.allocator;
     var d: parallax.Differ = .init(gpa);
