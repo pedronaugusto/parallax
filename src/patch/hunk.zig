@@ -100,6 +100,9 @@ pub const ScanOptions = struct {
     diagnostics: ?*types.Diagnostics = null,
 };
 
+/// Which kinds of line some line of ends in CR LF.
+pub const Endings = struct { context: bool = false, removed: bool = false, added: bool = false };
+
 /// What `scan` measured.
 pub const Scan = struct {
     /// The header, its counts those of the lines when they were recounted.
@@ -114,6 +117,9 @@ pub const Scan = struct {
     trailing: u64,
     added: u64,
     removed: u64,
+    /// The kinds of line that end in CR LF, a line a marker follows not
+    /// ending in a newline at all.
+    crlf: Endings,
 };
 
 pub const ScanError = types.ScanError;
@@ -148,7 +154,7 @@ const Scanner = struct {
         s.at = head_len;
         var old_left: u64 = header.old_len;
         var new_left: u64 = header.new_len;
-        var out: Scan = .{ .header = header, .consumed = 0, .lines = 0, .leading = 0, .trailing = 0, .added = 0, .removed = 0 };
+        var out: Scan = .{ .header = header, .consumed = 0, .lines = 0, .leading = 0, .trailing = 0, .added = 0, .removed = 0, .crlf = .{} };
         var last_is_line = false;
         while (old_left != 0 or new_left != 0) {
             const rest = s.text[s.at..];
@@ -156,33 +162,32 @@ const Scanner = struct {
             const len = lineLength(rest);
             s.read += 1;
             if (dialect == .git and rest[len - 1] != '\n') return s.fail(error.HunkLengthMismatch, true, "the patch ends inside a hunk");
+            // The marker a line is followed by takes the line's newline.
+            const marker = if (dialect == .git) gitMarker(rest, len) else 0;
+            const crlf = marker == 0 and len >= 2 and rest[len - 1] == '\n' and rest[len - 2] == '\r';
             switch (rest[0]) {
-                ' ', '\n' => {
+                ' ', '\n', '\t' => {
+                    if (rest[0] == '\t' and dialect != .gnu) return s.fail(error.UnexpectedLine, true, "a line in a hunk starts with none of ' ', '-', '+' or '\\'");
                     if (old_left == 0 or new_left == 0) return s.fail(error.HunkLengthMismatch, true, "a hunk holds more lines than its header says");
                     old_left -= 1;
                     new_left -= 1;
                     if (out.added == 0 and out.removed == 0) out.leading += 1;
                     out.trailing += 1;
-                },
-                '\t' => {
-                    if (dialect != .gnu) return s.fail(error.UnexpectedLine, true, "a line in a hunk starts with none of ' ', '-', '+' or '\\'");
-                    if (old_left == 0 or new_left == 0) return s.fail(error.HunkLengthMismatch, true, "a hunk holds more lines than its header says");
-                    old_left -= 1;
-                    new_left -= 1;
-                    if (out.added == 0 and out.removed == 0) out.leading += 1;
-                    out.trailing += 1;
+                    out.crlf.context = out.crlf.context or crlf;
                 },
                 '-' => {
                     if (old_left == 0) return s.fail(error.HunkLengthMismatch, true, "a hunk holds more lines than its header says");
                     old_left -= 1;
                     out.removed += 1;
                     out.trailing = 0;
+                    out.crlf.removed = out.crlf.removed or crlf;
                 },
                 '+' => {
                     if (new_left == 0) return s.fail(error.HunkLengthMismatch, true, "a hunk holds more lines than its header says");
                     new_left -= 1;
                     out.added += 1;
                     out.trailing = 0;
+                    out.crlf.added = out.crlf.added or crlf;
                 },
                 '\\' => {
                     if (dialect != .gnu) return s.fail(error.UnexpectedLine, true, "a line in a hunk starts with none of ' ', '-', '+' or '\\'");
@@ -194,12 +199,9 @@ const Scanner = struct {
             }
             last_is_line = true;
             s.at += len;
-            if (dialect == .git) {
-                const marker = gitMarker(rest, len);
-                if (marker != 0) {
-                    s.at += marker;
-                    s.read += 1;
-                }
+            if (marker != 0) {
+                s.at += marker;
+                s.read += 1;
             }
         }
         // A marker after the last line is part of the hunk too.
@@ -433,4 +435,18 @@ test "fuzz: any text scans or is refused by name, and what scans reads back" {
             }
         }
     }.run, .{});
+}
+
+test "a scan says which kinds of line end in CR LF, and a marker takes a line's newline" {
+    const s = try scan("@@ -1,2 +1,2 @@\n a\r\n-b\n+c\r\n d\n", .{});
+    try std.testing.expect(s.crlf.context);
+    try std.testing.expect(!s.crlf.removed);
+    try std.testing.expect(s.crlf.added);
+    // The newline of the last line is the marker's to take, so no CR LF is left.
+    const marked = try scan("@@ -1 +1 @@\n-a\r\n\\ No newline at end of file\n+b\n", .{});
+    try std.testing.expect(!marked.crlf.removed);
+    try std.testing.expect(!marked.crlf.added);
+    const bare = try scan("@@ -1,2 +1,2 @@\n\n-b\r\n+c\n", .{});
+    try std.testing.expect(!bare.crlf.context);
+    try std.testing.expect(bare.crlf.removed);
 }
