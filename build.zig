@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
     const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize }) catch null;
     if (shakedown) |dependency| tests.root_module.addImport("shakedown", dependency.module("shakedown"));
     // The references' output, captured once, as data: git's, GNU patch's
-    // and diff-match-patch's.
+    // and the reference's.
     for ([_][]const u8{
         "git-2.55/diff",
         "git-2.55/unified",
@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) void {
         "git-2.55/markers",
         "gnu-patch-2.8/patch",
         "gnu-patch-2.8/reversed",
-        "diff-match-patch-20241021/cleanup",
+        "cleanup-20241021/cleanup",
     }) |path| {
         const name = path[std.mem.findScalar(u8, path, '/').? + 1 ..];
         tests.root_module.addAnonymousImport(b.fmt("{s}.corpus", .{name}), .{ .root_source_file = b.path(b.fmt("testdata/{s}.corpus", .{path})) });

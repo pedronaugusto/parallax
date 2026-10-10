@@ -71,7 +71,7 @@ pub const Interner = diff.Interner;
 pub const Tokens = diff.Tokens;
 /// How `Differ.refine` diffs tokens.
 pub const RefineOptions = diff.RefineOptions;
-/// diff-match-patch's cleanups, for `RefineOptions.cleanup`.
+/// the reference's cleanups, for `RefineOptions.cleanup`.
 pub const Cleanup = diff.Cleanup;
 /// Bytes of one side, changed or not.
 pub const Span = diff.Span;

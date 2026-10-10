@@ -76,7 +76,7 @@ const refine = @import("refine.zig");
 pub const Tokens = refine.Tokens;
 /// How `Differ.refine` diffs tokens.
 pub const RefineOptions = refine.RefineOptions;
-/// diff-match-patch's cleanups, for `RefineOptions.cleanup`.
+/// the reference's cleanups, for `RefineOptions.cleanup`.
 pub const Cleanup = refine.Cleanup;
 /// Bytes of one side, changed or not.
 pub const Span = refine.Span;

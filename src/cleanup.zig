@@ -1,14 +1,14 @@
-//! diff-match-patch's cleanups, on the script of a token diff, decision for
+//! the reference's cleanups, on the script of a token diff, decision for
 //! decision. The semantic cleanup drops an equality no longer than the
 //! edits on both sides of it, slides each edit that sits between two
 //! equalities to the best word or line boundary, and turns the tokens a
 //! deletion ends with and the insertion after it starts with into an
 //! equality between them. The efficiency cleanup drops an equality shorter
 //! than the cost of the edits it keeps apart. Both measure in tokens, as
-//! diff-match-patch's word and line modes do.
+//! the reference's word and line modes do.
 //!
 //! The script is a list of runs, equal, deleted or inserted, each with its
-//! length and where it starts on each side; diff-match-patch's text
+//! length and where it starts on each side; the reference's text
 //! operations become moves of those bounds, and its text comparisons
 //! comparisons of token ids.
 
@@ -21,10 +21,10 @@ const Change = @import("change.zig").Change;
 pub const Cleanup = enum {
     /// The script as the diff gives it.
     none,
-    /// diff-match-patch's `diff_cleanupSemantic`: fewer, longer edits on
+    /// the reference semantic cleanup: fewer, longer edits on
     /// word and line boundaries, for a reader.
     semantic,
-    /// diff-match-patch's `diff_cleanupEfficiency`: fewer edits where an
+    /// the reference efficiency cleanup: fewer edits where an
     /// equality between them is shorter than `edit_cost`, for a machine.
     efficiency,
 };
@@ -121,7 +121,7 @@ const Script = struct {
     }
 
     /// The script as runs: each change's deletion before its insertion,
-    /// equalities between, as diff-match-patch's diffs come.
+    /// equalities between, as the reference's diffs come.
     fn load(s: *Script, changes: []const Change) Allocator.Error!void {
         const gpa = s.in.gpa;
         s.ops.clearRetainingCapacity();
@@ -156,9 +156,9 @@ const Script = struct {
         if (open) |c| try out.append(s.in.gpa, c);
     }
 
-    // ---- diff_cleanupMerge ------------------------------------------------
+    // ---- the merge pass ------------------------------------------------
 
-    /// `diff_cleanupMerge`: edits between two equalities gathered into one
+    /// The merge pass: edits between two equalities gathered into one
     /// deletion and one insertion with what they share at either end moved
     /// into the equalities, neighbouring equalities joined, then any edit
     /// that ends or starts with the equality beside it shifted over it;
@@ -256,7 +256,7 @@ const Script = struct {
         if (ops.items[ops.items.len - 1].len == 0) _ = ops.pop();
     }
 
-    /// The second pass of `diff_cleanupMerge`: an edit between two
+    /// The second pass of the merge: an edit between two
     /// equalities that ends with the one before, or starts with the one
     /// after, moves over it, and the two equalities become one. True when
     /// one moved.
@@ -301,7 +301,7 @@ const Script = struct {
         try s.insertOp(index, .{ .kind = .delete, .len = eq.len, .old = eq.old, .new = eq.new });
     }
 
-    // ---- diff_cleanupSemantic --------------------------------------------
+    // ---- the semantic cleanup --------------------------------------------
 
     fn semantic(s: *Script) Allocator.Error!void {
         const ops = s.ops;
@@ -346,7 +346,7 @@ const Script = struct {
         try s.overlaps();
     }
 
-    /// The last step of `diff_cleanupSemantic`: where a deletion ends with
+    /// The last step of `the semantic cleanup`: where a deletion ends with
     /// what the insertion after it starts with, or the other way round, and
     /// that overlap is at least half of either, it becomes an equality.
     fn overlaps(s: *Script) Allocator.Error!void {
@@ -377,13 +377,13 @@ const Script = struct {
         }
     }
 
-    /// `diff_cleanupSemanticLossless`: each edit between two equalities
+    /// `the semantic cleanupLossless`: each edit between two equalities
     /// slides, as far as the tokens allow, to the boundary that scores
     /// best, ties going right.
     fn lossless(s: *Script) void {
         const ops = s.ops;
         // Signed: removing both equalities around the first edit steps it
-        // back past the start, as diff-match-patch's index does.
+        // back past the start, as the reference's index does.
         var p: i64 = 1;
         while (p + 1 < ops.items.len) : (p += 1) {
             const pointer: usize = @intCast(p);
@@ -441,7 +441,7 @@ const Script = struct {
         }
     }
 
-    /// `diff_cleanupSemanticScore`: how good a boundary between `one` and
+    /// `the semantic cleanupScore`: how good a boundary between `one` and
     /// `two` is, from 6 (an end) down to 0 (inside a word).
     fn score(s: *const Script, one: Op, two: Op) u32 {
         if (one.len == 0 or two.len == 0) return 6;
@@ -465,7 +465,7 @@ const Script = struct {
         return 0;
     }
 
-    // ---- diff_cleanupEfficiency ------------------------------------------
+    // ---- the efficiency cleanup ------------------------------------------
 
     fn efficiency(s: *Script) Allocator.Error!void {
         const ops = s.ops;
@@ -572,7 +572,7 @@ fn isSpace(c: u8) bool {
     };
 }
 
-/// diff-match-patch's `^\r?\n\r?\n`.
+/// the reference's `^\r?\n\r?\n`.
 fn blankLineStart(b: []const u8) bool {
     var i: usize = 0;
     if (i < b.len and b[i] == '\r') i += 1;
@@ -582,7 +582,7 @@ fn blankLineStart(b: []const u8) bool {
     return i < b.len and b[i] == '\n';
 }
 
-test "the overlap of one end with the other's start, as diff-match-patch finds it" {
+test "the overlap of one end with the other's start, as the reference finds it" {
     const ids = struct {
         fn of(comptime text: []const u8) [text.len]u32 {
             var out: [text.len]u32 = undefined;

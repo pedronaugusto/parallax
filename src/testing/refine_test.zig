@@ -118,7 +118,7 @@ test "the semantic cleanup puts an edit on a word, and the efficiency cleanup jo
     const gpa = std.testing.allocator;
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
-    // diff-match-patch's own example: The c<ins>at c</ins>ame.
+    // the reference's own example: The c<ins>at c</ins>ame.
     const new = "The cat cat came.\n";
     const diff = try d.lines("The cat came.\n", new, .{});
     const plain = try d.refine(diff, diff.changes[0], .{ .tokens = .chars });

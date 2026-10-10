@@ -199,7 +199,7 @@ changed or not, that cover the change's lines and never cross a line end. A
 change with an empty side is one changed span per line. Tokens compare under the
 options' `Compare`, so case and whitespace can be overlooked inside a line too.
 
-`RefineOptions.cleanup` runs diff-match-patch's cleanups over the token script
+`RefineOptions.cleanup` runs the reference's cleanups over the token script
 first, measured in tokens. `.semantic` is for a reader: an equality no longer
 than the edits on both sides of it goes, each edit between two equalities slides
 to the best word or line boundary, and what a deletion ends with and the
@@ -343,8 +343,8 @@ GNU patch 2.8 is the reference for applying: 488 applications captured from it
 (`testdata/gnu-patch-2.8/`) cover offsets, fuzz, reverse and rejected hunks, and
 400 more in its batch mode the patches it takes for reversed or already applied;
 parallax must write the same text and report the same fuzz and offset for every
-hunk. diff-match-patch 20241021 is the reference for the cleanups: its diffs of
-609 text pairs, cleaned up by parallax's passes, must come out as its own
+hunk. A reference implementation of the cleanups (version 20241021) is their
+reference: its diffs of 609 text pairs, cleaned up by parallax's passes, must come out as its own
 semantic and efficiency cleanups leave them.
 
 Properties run through shakedown on 23,400 seeded cases in every `zig build test`,

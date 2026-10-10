@@ -35,11 +35,11 @@ pub const RefineOptions = struct {
     algorithm: Algorithm = .histogram,
     /// Tokens are equal when their comparison forms are.
     compare: Compare = .{},
-    /// diff-match-patch's cleanups over the token script, measured in
+    /// the reference's cleanups over the token script, measured in
     /// tokens.
     cleanup: Cleanup = .none,
     /// For `.efficiency`: what one edit costs, in tokens; an equality
-    /// shorter than this between edits goes (diff-match-patch's
+    /// shorter than this between edits goes (the reference's
     /// `Diff_EditCost`).
     edit_cost: u32 = 4,
     /// A flag the caller may raise, from another thread, to abandon the

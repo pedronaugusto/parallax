@@ -1,7 +1,7 @@
-//! The cleanups against diff-match-patch's own, captured once as data
-//! (`testdata/diff-match-patch-20241021/`): its diff of each pair, cleaned
+//! The cleanups against the reference's own, captured once as data
+//! (`testdata/cleanup-20241021/`): its diff of each pair, cleaned
 //! up by parallax's passes over a character script, must come out as
-//! diff-match-patch's `diff_cleanupSemantic` and `diff_cleanupEfficiency`
+//! the reference semantic and efficiency cleanups
 //! leave it.
 
 const std = @import("std");
@@ -38,7 +38,7 @@ const Chars = struct {
     }
 };
 
-/// diff-match-patch's operations ("=3", "-2", "+4", one a line) as a
+/// the reference's operations ("=3", "-2", "+4", one a line) as a
 /// script.
 fn script(gpa: std.mem.Allocator, out: *std.ArrayList(Change), ops: []const u8) !void {
     out.clearRetainingCapacity();
@@ -74,10 +74,10 @@ fn script(gpa: std.mem.Allocator, out: *std.ArrayList(Change), ops: []const u8) 
     if (open) |c| try out.append(gpa, c);
 }
 
-test "the cleanups leave diff-match-patch's diffs as diff-match-patch does" {
+test "the cleanups leave the reference's diffs as the reference does" {
     const gpa = std.testing.allocator;
     const c = try corpus.Corpus.parse(cleanup_corpus);
-    try std.testing.expectEqualStrings("diff-match-patch 20241021", c.git_version);
+    try std.testing.expectEqualStrings("reference cleanups 20241021", c.git_version);
     var interner: parallax.Interner([]const u8, std.hash_map.StringContext) = .init(gpa, .{});
     defer interner.deinit();
     var old: Chars = .{};
