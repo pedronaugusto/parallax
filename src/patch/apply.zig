@@ -220,7 +220,8 @@ fn emit(s: *State, h: Hunk, where: i64) Io.Writer.Error!void {
 /// Write `base` with `file`'s hunks applied. `results`, one per hunk, is
 /// filled when given. With `.fail`, the first hunk that does not apply ends
 /// the call with `error.HunkFailed`, its result `.rejected`, and nothing is
-/// promised about what `w` holds.
+/// promised about what `w` holds. A `results` with other than one slot per
+/// hunk is `error.InvalidResults`, before anything is written.
 pub fn apply(
     gpa: Allocator,
     w: *Io.Writer,
@@ -229,7 +230,7 @@ pub fn apply(
     options: types.ApplyOptions,
     results: ?[]types.HunkResult,
 ) types.ApplyError!void {
-    if (results) |r| std.debug.assert(r.len == file.hunks.len);
+    if (results) |r| if (r.len != file.hunks.len) return error.InvalidResults;
     var ends: std.ArrayList(u32) = .empty;
     defer ends.deinit(gpa);
     try lines_mod.split(gpa, &ends, base);

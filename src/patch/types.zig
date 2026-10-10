@@ -123,4 +123,4 @@ pub const HunkResult = union(enum) {
     rejected,
 };
 
-pub const ApplyError = error{ OutOfMemory, WriteFailed, HunkFailed, InputTooLarge };
+pub const ApplyError = error{ OutOfMemory, WriteFailed, HunkFailed, InputTooLarge, InvalidResults };

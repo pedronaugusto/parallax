@@ -163,3 +163,13 @@ test "a reversed or already applied patch is noticed where GNU patch notices it"
     try std.testing.expectEqual(@as(usize, 400), count);
     try std.testing.expect(detected > 100);
 }
+
+test "a results slice that is not one slot per hunk is refused, not trusted" {
+    const gpa = std.testing.allocator;
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    const file: parallax.patch.File = .{ .header = &.{}, .old_name = "a", .new_name = "a", .hunks = &.{} };
+    var slots: [1]parallax.patch.HunkResult = undefined;
+    try std.testing.expectError(error.InvalidResults, parallax.patch.apply(gpa, &out.writer, "x\n", file, .{}, &slots));
+    try std.testing.expectEqual(@as(usize, 0), out.written().len);
+}

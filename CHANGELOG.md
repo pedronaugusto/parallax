@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- `patch.apply` returns `error.InvalidResults` for a `results` slice that is not one slot per hunk, where it asserted (undefined behaviour in ReleaseFast).
 - `parallax.diff`, `parallax.merge`, `parallax.patch`, `parallax.interner`, `parallax.lines` and `parallax.compare` are no longer separate build modules: `b.dependency("parallax", ...).module("parallax.patch")` no longer exists. Take `module("parallax")` and use `parallax.patch` and the others as namespaces of it; code that already wrote `@import("parallax").patch` is unchanged. No part had a dependency or a link of its own, so a module of its own bought nothing Zig's lazy analysis does not already give: a program that names only `parallax.patch` still compiles only what that reaches.
 - `Options.max_work` and `SequenceOptions.max_work` take `Work` (Myers sweeps); construct a cap with `Work.fromRaw(n)`. `Differ.shrink` takes `Bytes`, constructed with `Bytes.fromRaw(n)`.
 - `Interner.intern` returns `ClassId`, `get` takes `ClassId`, and `internSlice` writes `[]ClassId`. `classes` returns `ClassCount`. `Differ.sequences` and `mergeSequences` take `[]const ClassId`; their options take `ClassCount` for `classes`. Import raw external IDs/counts explicitly with `fromRaw`.
