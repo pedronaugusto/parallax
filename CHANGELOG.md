@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Smith fuzz tests are shakedown `check` properties.
 - `parse` is built on the same grammar. A patch that ends inside a hunk reports the line that should have come next, where it reported the last one.
 
 ### Breaking
