@@ -16,8 +16,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 /// Change flags shared by the algorithm entry points.
-pub const Flags = @import("flags").Flags;
-const fit = @import("fit");
+pub const Flags = @import("flags.zig").Flags;
+const fit = @import("fit.zig");
 
 /// Below this edit cost the search never gives up, however small the input.
 const max_cost_min: u64 = 256;

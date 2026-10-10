@@ -4,11 +4,11 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compare_mod = @import("parallax.compare");
-const fit = @import("fit");
+const compare_mod = @import("compare.zig");
+const fit = @import("fit.zig");
 /// Comparison contract accepted by the line table.
 pub const Compare = compare_mod.Compare;
-const Lines = @import("parallax.lines").Lines;
+const Lines = @import("lines.zig").Lines;
 
 /// The texts of one call, interned into one table: a diff's two, a merge's
 /// three. A line is named globally by its side's offset plus its index.

@@ -4,9 +4,9 @@
 //! nothing is allocated.
 
 const std = @import("std");
-const Change = @import("change").Change;
-const Lines = @import("parallax.lines").Lines;
-const compare = @import("parallax.compare");
+const Change = @import("change.zig").Change;
+const Lines = @import("lines.zig").Lines;
+const compare = @import("compare.zig");
 
 /// A caller's test of one line, given with its newline.
 pub const LinePredicate = struct {

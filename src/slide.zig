@@ -9,10 +9,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 /// Change flags shared by the algorithm entry points.
-pub const Flags = @import("flags").Flags;
+pub const Flags = @import("flags.zig").Flags;
 const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
-const compare = @import("parallax.compare");
+const compare = @import("compare.zig");
 
 /// A maximal run of changed lines. Empty when start equals end.
 const Group = struct { start: i64, end: i64 };

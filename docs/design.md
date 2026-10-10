@@ -36,7 +36,7 @@ The public facade exports supported types without becoming their state owner.
 | Patch types | `patch/types.zig` owns parsed patch records, options, diagnostics and results. |
 | Patch parse and apply | `patch/parse.zig` owns syntax validation and arena-backed records; `patch/apply.zig` owns offset/fuzz search and writes applied text. |
 | Merge writer | `merge.zig` renders regions and iterates marked text. |
-| Patches and root facade | `patch.zig` exports patch contracts; `parallax.zig` reexports the supported concern modules. |
+| Patches and root facade | `patch.zig` exports patch contracts; `parallax.zig` names the concerns as namespaces and reexports the types most callers want. |
 
 Paths in the table are under [src](../src). Tests and fixture readers are
 separate from the production graph; aegis owns scalar safety types, while shakedown and preflight are lazy test/build
@@ -253,17 +253,28 @@ exist in the current computation package. This batch uses the
 A3 scalar contracts after their cloak adoption; it introduces no later-wave
 lifecycle/input API or future functionality.
 
-## Build modules
+## Build shape
 
-Consumers may take `parallax.diff`, `parallax.merge`, `parallax.patch`,
-`parallax.interner`, `parallax.lines` or `parallax.compare` alone. `parallax`
-reexports these shared declarations. Merge rendering depends on the diff
-workspace and its region types; patch parsing/application depends only on
-lines, comparison and aegis. Diff depends on lines, comparison, interning,
-aegis and its existing algorithm layers. Internal storage, flags, changes and
-cleanup have one module owner and are not separately registered consumer
-modules. The source layer graph maps every named import and permits no upward
-edge; `check-consumer` proves shared identities while fetching only aegis.
+There is one build module, `parallax`, with one dependency, aegis. Its concerns
+are namespaces of the root: `parallax.diff`, `parallax.merge`, `parallax.patch`,
+`parallax.interner`, `parallax.lines` and `parallax.compare`, and the root also
+declares the types most callers want, the same declarations. A separate module
+buys something only where a part's dependencies should not be fetched by users
+of the others, or where a part must not link something. No part here has either:
+all of them need the same aegis and nothing else, and Zig's lazy analysis already
+compiles only what a program's references reach, so a program that names only
+`parallax.patch` builds the patch code and what it imports, not the diff
+algorithms.
+
+The layering that separate modules would have enforced is enforced on files.
+Merge rendering depends on the diff workspace and its region types; patch
+parsing and application depend only on lines, comparison and aegis; diff depends
+on lines, comparison, interning, aegis and the algorithm layers below it. The
+source layer graph in [ci/layers.zig](../ci/layers.zig) places every production
+file and permits no upward edge. `check-consumer` builds a project that depends
+on parallax and fetches only aegis, and proves the namespaces and the root name
+the same declarations. `check-freestanding` builds the library for
+wasm32-freestanding, a target with no OS.
 
 The package preflight configuration selects glint A004 as a gate for adopted
 IDs, units and checked integers. Its paths include production, test support,

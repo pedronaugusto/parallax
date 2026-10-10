@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const parallax = @import("../parallax.zig");
-const compare = @import("parallax.compare");
+const compare = @import("../compare.zig");
 
 const shakedown = @import("shakedown");
 const gen = shakedown.gen;

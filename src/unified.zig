@@ -6,8 +6,8 @@ const std = @import("std");
 const Io = std.Io;
 const Diff = @import("script.zig").Diff;
 const hunks_mod = @import("hunks.zig");
-const compare = @import("parallax.compare");
-const Lines = @import("parallax.lines").Lines;
+const compare = @import("compare.zig");
+const Lines = @import("lines.zig").Lines;
 
 /// The text after a hunk's second `@@`.
 pub const Heading = hunks_mod.Heading;

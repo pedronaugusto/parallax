@@ -289,9 +289,12 @@ between them; anything larger is `error.InputTooLarge`. Past that, a diff, merge
 or refinement fails only with `error.OutOfMemory`; `patch.parse` and `patch.apply`
 have errors of their own, named in their error sets.
 
-The root module is a facade. For one concern, take `parallax.diff`,
-`parallax.merge`, `parallax.patch`, `parallax.interner`, `parallax.lines` or
-`parallax.compare` from the same dependency. They share type identities.
+There is one module, `parallax`, and its concerns are namespaces of it:
+`parallax.diff`, `parallax.merge`, `parallax.patch`, `parallax.interner`,
+`parallax.lines` and `parallax.compare`. The root also declares the types most
+callers want (`parallax.Differ`, `parallax.Lines`, ...), the same declarations.
+None of the parts has a dependency or a link of its own, so a program that names
+only `parallax.patch` compiles only what the patch code reaches.
 `ClassId` distinguishes an equivalence class from a position; `ClassCount`,
 `Work` and `Bytes` distinguish counts in public options and scratch retention.
 Use `fromRaw` when importing a raw value, and `raw()` only at an explicit

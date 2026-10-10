@@ -1,7 +1,19 @@
 //! Line and sequence differences, three-way merges and unified patches.
-//! Concern modules share declaration identities through the module graph.
+//! One module; its parts are namespaces, and the types most callers want
+//! are also declared here.
 
-const diff = @import("parallax.diff");
+/// Line diffs and refinement: the workspace, options, scripts and hunks.
+pub const diff = @import("diff.zig");
+/// Comparison forms: what counts as the same line.
+pub const compare = @import("compare.zig");
+/// Dense ids for any type with a hash and an equality.
+pub const interner = @import("interner.zig");
+/// Borrowed line views of a text.
+pub const lines = @import("lines.zig");
+/// Three-way merge rendering and marker parsing.
+pub const merge = @import("merge.zig");
+/// Unified patch parsing and application.
+pub const patch = @import("patch.zig");
 
 /// Which whitespace differences two lines may have and still be the same.
 pub const Whitespace = diff.Whitespace;
@@ -69,10 +81,6 @@ pub const Refined = diff.Refined;
 pub const OwnedDiff = diff.OwnedDiff;
 /// One-shot line diff, borrowing the input text.
 pub const diffLines = diff.diffLines;
-/// Three-way merge rendering and marker parsing.
-pub const merge = @import("parallax.merge");
-/// Unified patch parsing and application.
-pub const patch = @import("parallax.patch");
 
 test {
     _ = diff;

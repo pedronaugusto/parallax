@@ -71,18 +71,7 @@ pub const layers: []const gantry.rules.Layer = &.{
 
 pub const entries: []const []const u8 = &.{};
 
-pub const modules: []const gantry.NamedModule = &.{
-    .{ .name = "fit", .path = "src/fit.zig" },
-    .{ .name = "cleanup", .path = "src/cleanup.zig" },
-    .{ .name = "change", .path = "src/change.zig" },
-    .{ .name = "flags", .path = "src/flags.zig" },
-    .{ .name = "parallax.diff", .path = "src/diff.zig" },
-    .{ .name = "parallax.merge", .path = "src/merge.zig" },
-    .{ .name = "parallax.patch", .path = "src/patch.zig" },
-    .{ .name = "parallax.interner", .path = "src/interner.zig" },
-    .{ .name = "parallax.lines", .path = "src/lines.zig" },
-    .{ .name = "parallax.compare", .path = "src/compare.zig" },
-};
+pub const modules: []const gantry.NamedModule = &.{};
 
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{

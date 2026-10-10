@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const parallax = @import("../parallax.zig");
-const cleanup = @import("cleanup");
+const cleanup = @import("../cleanup.zig");
 const corpus = @import("corpus.zig");
 
 const cleanup_corpus = @embedFile("cleanup.corpus");

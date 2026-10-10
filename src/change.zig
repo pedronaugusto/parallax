@@ -3,7 +3,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 /// Change flags shared by the algorithm entry points.
-pub const Flags = @import("flags").Flags;
+pub const Flags = @import("flags.zig").Flags;
 
 /// Which algorithm produces the edit script.
 pub const Algorithm = enum { myers, patience, histogram };

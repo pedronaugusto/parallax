@@ -14,8 +14,8 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const fit = @import("fit");
-const Change = @import("change").Change;
+const fit = @import("fit.zig");
+const Change = @import("change.zig").Change;
 
 /// What `Differ.refine` does to the token script before it becomes spans.
 pub const Cleanup = enum {

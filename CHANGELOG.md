@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
+- `parallax.diff`, `parallax.merge`, `parallax.patch`, `parallax.interner`, `parallax.lines` and `parallax.compare` are no longer separate build modules: `b.dependency("parallax", ...).module("parallax.patch")` no longer exists. Take `module("parallax")` and use `parallax.patch` and the others as namespaces of it; code that already wrote `@import("parallax").patch` is unchanged. No part had a dependency or a link of its own, so a module of its own bought nothing Zig's lazy analysis does not already give: a program that names only `parallax.patch` still compiles only what that reaches.
 - `Options.max_work` and `SequenceOptions.max_work` take `Work` (Myers sweeps); construct a cap with `Work.fromRaw(n)`. `Differ.shrink` takes `Bytes`, constructed with `Bytes.fromRaw(n)`.
 - `Interner.intern` returns `ClassId`, `get` takes `ClassId`, and `internSlice` writes `[]ClassId`. `classes` returns `ClassCount`. `Differ.sequences` and `mergeSequences` take `[]const ClassId`; their options take `ClassCount` for `classes`. Import raw external IDs/counts explicitly with `fromRaw`.
 
@@ -24,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Use published aegis for equivalence-class IDs/counts, work caps, typed scratch byte accounting and patch header integers; retain compact raw kernels behind explicit boundaries.
-- Expose the existing diff, merge, patch, interner, lines and comparison concerns as independent build modules with one owner per shared declaration; the root is a facade.
-- Pin green published aegis a5d17d0, preflight e80b9a6 and shakedown b7458b6; regenerate CI from the pinned preflight.
+- Expose the diff, merge, patch, interner, lines and comparison concerns as namespaces of the one module (`parallax.diff`, `.merge`, `.patch`, `.interner`, `.lines`, `.compare`), each declaration with one owner; the root reexports the types most callers want.
+- Pin green published aegis a5d17d0, preflight c04e49d and shakedown 99418ac; regenerate CI from the pinned preflight.
 
 - Property tests use shakedown generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; allocation failure sweeps use its NoResize allocator and repeated fixtures use its corpus helpers.
 - Consume shakedown unchanged from its upstream module, including its 32-bit generator fixes.

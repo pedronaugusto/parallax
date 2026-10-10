@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Compare = @import("parallax.compare").Compare;
+const Compare = @import("../compare.zig").Compare;
 
 /// One line of a hunk.
 pub const Line = struct {

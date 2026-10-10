@@ -6,16 +6,16 @@
 const std = @import("std");
 const aegis = @import("aegis");
 const Allocator = std.mem.Allocator;
-const Flags = @import("flags").Flags;
-const fit = @import("fit");
-const change = @import("change");
+const Flags = @import("flags.zig").Flags;
+const fit = @import("fit.zig");
+const change = @import("change.zig");
 const Change = change.Change;
 const Algorithm = change.Algorithm;
 const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
 const patience = @import("patience.zig");
 const slide = @import("slide.zig");
-const Lines = @import("parallax.lines").Lines;
+const Lines = @import("lines.zig").Lines;
 
 pub const Buffers = struct {
     myers: myers.Buffers = .{},

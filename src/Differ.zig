@@ -9,20 +9,20 @@ const Differ = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const compare_mod = @import("parallax.compare");
+const compare_mod = @import("compare.zig");
 const Compare = compare_mod.Compare;
-const lines_mod = @import("parallax.lines");
+const lines_mod = @import("lines.zig");
 const Lines = lines_mod.Lines;
 const table_mod = @import("table.zig");
-const fit = @import("fit");
-const change_mod = @import("change");
+const fit = @import("fit.zig");
+const change_mod = @import("change.zig");
 /// One run produced by the workspace.
 pub const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
 const Diff = @import("script.zig").Diff;
 const threeway = @import("threeway.zig");
-const class = @import("parallax.interner");
+const class = @import("interner.zig");
 const refine_mod = @import("refine.zig");
 
 gpa: Allocator,

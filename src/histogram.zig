@@ -13,9 +13,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 /// Change flags shared by the algorithm entry points.
-pub const Flags = @import("flags").Flags;
+pub const Flags = @import("flags.zig").Flags;
 const myers = @import("myers.zig");
-const fit = @import("fit");
+const fit = @import("fit.zig");
 
 /// Lines occurring more often than this in a region anchor nothing.
 const max_chain: u32 = 64;

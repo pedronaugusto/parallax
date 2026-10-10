@@ -9,14 +9,14 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const change_mod = @import("change");
+const change_mod = @import("change.zig");
 const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
-const compare_mod = @import("parallax.compare");
+const compare_mod = @import("compare.zig");
 const Compare = compare_mod.Compare;
-const Lines = @import("parallax.lines").Lines;
+const Lines = @import("lines.zig").Lines;
 const core = @import("core.zig");
-const class = @import("parallax.interner");
+const class = @import("interner.zig");
 
 /// Which conflict body `write` produces.
 pub const Style = enum {

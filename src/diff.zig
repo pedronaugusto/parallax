@@ -10,13 +10,13 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const compare = @import("parallax.compare");
-const lines_mod = @import("parallax.lines");
-const change = @import("change");
+const compare = @import("compare.zig");
+const lines_mod = @import("lines.zig");
+const change = @import("change.zig");
 const script = @import("script.zig");
 const hunks = @import("hunks.zig");
 const unified = @import("unified.zig");
-const interner = @import("parallax.interner");
+const interner = @import("interner.zig");
 const threeway = @import("threeway.zig");
 
 /// Which whitespace differences two lines may have and still be the same.
@@ -144,11 +144,10 @@ test {
     _ = lines_mod;
     _ = @import("table.zig");
     _ = @import("slide.zig");
-    _ = @import("parallax.interner");
+    _ = @import("interner.zig");
     _ = @import("refine.zig");
-    _ = @import("cleanup");
-    _ = @import("flags");
+    _ = @import("cleanup.zig");
+    _ = @import("flags.zig");
     _ = @import("myers.zig");
-    _ = @import("fit");
-    _ = @import("cleanup");
+    _ = @import("fit.zig");
 }

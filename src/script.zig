@@ -1,9 +1,9 @@
 //! A finished diff: the two sides, the script, and what can be read off it.
 
-const change = @import("change");
+const change = @import("change.zig");
 const Change = change.Change;
-const Lines = @import("parallax.lines").Lines;
-const Compare = @import("parallax.compare").Compare;
+const Lines = @import("lines.zig").Lines;
+const Compare = @import("compare.zig").Compare;
 const hunks_mod = @import("hunks.zig");
 
 /// Added and removed line counts.

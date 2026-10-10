@@ -5,16 +5,16 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const fit = @import("fit");
-const compare_mod = @import("parallax.compare");
+const fit = @import("fit.zig");
+const compare_mod = @import("compare.zig");
 const Compare = compare_mod.Compare;
-const Lines = @import("parallax.lines").Lines;
-const change_mod = @import("change");
+const Lines = @import("lines.zig").Lines;
+const change_mod = @import("change.zig");
 const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
-const Interner = @import("parallax.interner").Interner;
-const cleanup_mod = @import("cleanup");
+const Interner = @import("interner.zig").Interner;
+const cleanup_mod = @import("cleanup.zig");
 
 /// What refinement does to the token script before it becomes spans.
 pub const Cleanup = cleanup_mod.Cleanup;

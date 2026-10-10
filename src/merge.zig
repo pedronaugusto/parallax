@@ -5,10 +5,10 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
-const diff = @import("parallax.diff");
-const Lines = @import("parallax.lines").Lines;
+const diff = @import("diff.zig");
+const Lines = @import("lines.zig").Lines;
 const Differ = diff.Differ;
-const compare_mod = @import("parallax.compare");
+const compare_mod = @import("compare.zig");
 
 pub const Style = diff.MergeStyle;
 pub const Level = diff.MergeLevel;
