@@ -160,8 +160,10 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
     // The benchmark harness is shakedown's; it is bound to this package's
     // aegis, so one aegis is linked.
     const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
-    // unreachable: `build` asks for preflight only once shakedown is there.
-    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer }) catch unreachable;
+    // Until shakedown is fetched, configuration runs again once it is, so this
+    // pass builds nothing and needs only the library.
+    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer }) catch
+        return b.allocator.dupe(std.Build.Module.Import, &.{.{ .name = "parallax", .module = computationModule(b, target, optimize) }}) catch @panic("out of memory");
     if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown, aegis);
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "parallax", .module = computationModule(b, target, optimize) },
