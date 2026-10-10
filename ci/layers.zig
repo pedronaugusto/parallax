@@ -1,5 +1,6 @@
 //! Source layers, lowest first. Every production source has one place.
 const gantry = @import("gantry");
+const family = @import("preflight_rules");
 
 pub const layers: []const gantry.rules.Layer = &.{
     .{ .name = "comparison, lines and flags", .patterns = &.{
@@ -72,6 +73,9 @@ pub const layers: []const gantry.rules.Layer = &.{
 pub const entries: []const []const u8 = &.{};
 
 pub const modules: []const gantry.NamedModule = &.{};
+
+/// Durable writes go through airlock; parallax makes none.
+pub const owned: []const gantry.rules.TokenRule = &family.durability;
 
 pub const references: []const gantry.rules.ReferenceRule = &.{
     .{ .name = "named dependencies", .unresolved_only = true, .except_targets = &.{
