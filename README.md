@@ -300,7 +300,7 @@ only `parallax.patch` compiles only what the patch code reaches.
 Use `fromRaw` when importing a raw value, and `raw()` only at an explicit
 representation boundary. `Differ.shrink(.fromRaw(n))` retains scratch up to
 n bytes before releasing it all. Production computation depends on aegis/std;
-preflight and shakedown remain lazy build/test dependencies.
+preflight and shakedown are dev dependencies through [bay](https://github.com/pedronaugusto/bay), which a project that depends on parallax never sees.
 
 ## Scope
 
@@ -328,7 +328,7 @@ is built from.
 
 ## Testing
 
-`zig build test` runs the suite and the usage example. git's own output is the
+`bay test` runs the suite and the usage example. git's own output is the
 reference: a corpus captured once from git 2.55 and committed as data
 (`testdata/git-2.55/`, under 2 MB) holds edit scripts for 600 pairs under every
 algorithm, 1,483 unified bodies across context, inter-hunk context, headings, the
@@ -347,11 +347,11 @@ hunk. A reference implementation of the cleanups (version 20241021) is their
 reference: its diffs of 609 text pairs, cleaned up by parallax's passes, must come out as its own
 semantic and efficiency cleanups leave them.
 
-Properties run through shakedown on 23,400 seeded cases in every `zig build test`,
+Properties run through shakedown on 23,400 seeded cases in every `bay test`,
 with failures shrunk and printed as replayable tapes. Select a property with
 `-Dtest-filter` and set `SHAKEDOWN_TAPE` to replay it, or `SHAKEDOWN_SEED` to
 choose another seed. The same properties run under the fuzzer
-with `zig build test --fuzz`: every script applies, under every algorithm,
+with `bay test --fuzz`: every script applies, under every algorithm,
 comparison, work cap and a raised stop flag, for lines and for id sequences; a
 minimal script is never longer; hunks hold their changes, with whole functions
 too; lines of one form always match; refined spans tile every changed line under
@@ -367,21 +367,21 @@ held to recorded work units and scripts, a stop flag raised before or during a
 diff ends it with a script that applies, and the deep inputs run on a 64 KiB
 stack.
 
-`zig build bench` builds the programs into `zig-out/bench` and times parallax's
+`bay bench` builds the programs into `zig-out/bench` and times parallax's
 own workloads in ReleaseFast: large files with few and many edits, the
 adversarial shapes, many small diffs through one workspace with their latency and
 allocations, the whitespace flags, merges with many conflicts, each beside the
 code parallax replaces, the refinement of every replaced line, and patches parsed
-and applied as they are, shifted and with their context changed. `zig build
+and applied as they are, shifted and with their context changed. `bay
 bench-corpus -- --repo <git repository> --out <directory>` collects the
 changed files of a range of real history (Linux v6.11..v6.12 unless `--range`
 says otherwise) into a directory outside this repository, checked against
 `bench/linux-v6.11-v6.12.manifest`; `zig-out/bench/bench --corpus <directory>`
 then also times every changed file of the range, the large ones apart, and the
-merges of its merge commits. `zig build cli -Doptimize=ReleaseFast` builds
+merges of its merge commits. `bay cli -Doptimize=ReleaseFast` builds
 `bench/cli`, a small command that diffs, merges and applies files, for timing
 parallax end to end against other tools. Run `zig-out/bench/bench` with `--json`,
-`--runs N`, `--only W1,W5` or `--smoke` for smaller inputs. Every `zig build test`
+`--runs N`, `--only W1,W5` or `--smoke` for smaller inputs. Every `bay test`
 smoke-runs all three programs, including a tiny Git history for the corpus writer.
 
 ## Licence

@@ -1,9 +1,8 @@
 const std = @import("std");
 
+/// What a project that depends on parallax builds: the `parallax` module and its
+/// library. The tests, example, benchmarks and gate are `dev`'s.
 pub fn build(b: *std.Build) void {
-    // lazyImport compares every package of the dependency tree at comptime;
-    // a large tree runs past the default quota of 1000 branches.
-    @setEvalBranchQuota(100_000);
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
@@ -16,27 +15,36 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "aegis", .module = aegis }},
     });
-    const library = b.addLibrary(.{ .name = "parallax", .root_module = module });
-    b.installArtifact(library);
-    if (b.dep_prefix.len != 0) return;
+    b.installArtifact(b.addLibrary(.{ .name = "parallax", .root_module = module }));
+}
+
+/// parallax's development: its tests, example, benchmarks and checks under
+/// preflight's gate, with shakedown bound to parallax's aegis. Run through bay.
+pub fn dev(b: *std.Build, tools: type) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const test_filter = b.option([]const u8, "test-filter", "Select tests by name");
+    const baseline_filter = b.option([]const u8, "baseline-filter", "Select baseline tests by name");
+    const package = b.dependency("parallax", .{ .target = target, .optimize = optimize });
+    const p = package.builder;
+    const module = package.module("parallax");
+    const library = package.artifact("parallax");
+    const aegis_dependency = p.dependency("aegis", .{ .target = target, .optimize = optimize });
+    const aegis = aegis_dependency.module("aegis");
     const tests = b.addTest(.{
         .name = "parallax-tests",
-        .filters = if (b.option([]const u8, "test-filter", "Select tests by name")) |filter| &.{filter} else &.{},
+        .filters = if (test_filter) |filter| &.{filter} else &.{},
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests.zig"),
+            .root_source_file = p.path("src/tests.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
     tests.root_module.addImport("aegis", aegis);
-    // Keep configuring on the initial fetch pass so preflight declares
-    // every -D option before Zig validates it.
     // Bound to this package's aegis, so one aegis is linked.
-    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer }) catch null;
-    if (shakedown) |dependency| {
-        if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(dependency, aegis);
-        tests.root_module.addImport("shakedown", dependency.module("shakedown"));
-    }
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
+    tools.shakedown.useAegis(shakedown, aegis);
+    tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
     // The references' output, captured once, as data: git's, GNU patch's
     // and the reference's.
     for ([_][]const u8{
@@ -50,17 +58,17 @@ pub fn build(b: *std.Build) void {
         "cleanup-20241021/cleanup",
     }) |path| {
         const name = path[std.mem.findScalar(u8, path, '/').? + 1 ..];
-        tests.root_module.addAnonymousImport(b.fmt("{s}.corpus", .{name}), .{ .root_source_file = b.path(b.fmt("testdata/{s}.corpus", .{path})) });
+        tests.root_module.addAnonymousImport(b.fmt("{s}.corpus", .{name}), .{ .root_source_file = p.path(b.fmt("testdata/{s}.corpus", .{path})) });
     }
-    tests.root_module.addAnonymousImport("gen", .{ .root_source_file = b.path("bench/gen.zig") });
+    tests.root_module.addAnonymousImport("gen", .{ .root_source_file = p.path("bench/gen.zig") });
     const test_step = b.step("test", "Run the tests and example");
     test_step.dependOn(&b.addRunArtifact(tests).step);
     // The benchmark baseline is code with tests of its own; its root runs them.
     const baseline_tests = b.addTest(.{
         .name = "baseline-tests",
-        .filters = if (b.option([]const u8, "baseline-filter", "Select baseline tests by name")) |filter| &.{filter} else &.{},
+        .filters = if (baseline_filter) |filter| &.{filter} else &.{},
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/baseline/diff/textdiff.zig"),
+            .root_source_file = p.path("bench/baseline/diff/textdiff.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -71,7 +79,7 @@ pub fn build(b: *std.Build) void {
     check.dependOn(&baseline_tests.step);
     const example = b.addExecutable(.{
         .name = "usage",
-        .root_module = b.createModule(.{ .root_source_file = b.path("examples/usage.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "parallax", .module = module }} }),
+        .root_module = b.createModule(.{ .root_source_file = p.path("examples/usage.zig"), .target = target, .optimize = optimize, .imports = &.{.{ .name = "parallax", .module = module }} }),
     });
     const examples = b.step("examples", "Build and run the usage example");
     examples.dependOn(&b.addRunArtifact(example).step);
@@ -83,7 +91,7 @@ pub fn build(b: *std.Build) void {
     const bench = b.addExecutable(.{
         .name = "bench",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/main.zig"),
+            .root_source_file = p.path("bench/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = benchImports(b, target, optimize),
@@ -95,7 +103,7 @@ pub fn build(b: *std.Build) void {
     const cli = b.addExecutable(.{
         .name = "parallax-cli",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("bench/cli.zig"),
+            .root_source_file = p.path("bench/cli.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{.{ .name = "parallax", .module = module }},
@@ -107,12 +115,12 @@ pub fn build(b: *std.Build) void {
     // names, written outside this repository.
     const corpus = b.addExecutable(.{
         .name = "bench-corpus",
-        .root_module = b.createModule(.{ .root_source_file = b.path("bench/corpus.zig"), .target = target, .optimize = .safe }),
+        .root_module = b.createModule(.{ .root_source_file = p.path("bench/corpus.zig"), .target = target, .optimize = .safe }),
     });
     check.dependOn(&corpus.step);
     const corpus_run = b.addRunArtifact(corpus);
     corpus_run.addArg("--manifest");
-    corpus_run.addFileArg(b.path("bench/linux-v6.11-v6.12.manifest"));
+    corpus_run.addFileArg(p.path("bench/linux-v6.11-v6.12.manifest"));
     corpus_run.addPassthruArgs();
     corpus_run.has_side_effects = true;
     b.step("bench-corpus", "Collect the real-history corpus: -- --repo <git repository> --out <directory>").dependOn(&corpus_run.step);
@@ -121,53 +129,42 @@ pub fn build(b: *std.Build) void {
     const object = b.addObject(.{
         .name = "parallax-freestanding",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("ci/freestanding.zig"),
+            .root_source_file = p.path("ci/freestanding.zig"),
             .target = freestanding,
             .optimize = .small,
             .imports = &.{.{ .name = "parallax", .module = computationModule(b, freestanding, .small) }},
         }),
     });
     b.step("check-freestanding", "Build the library for wasm32-freestanding").dependOn(&object.step);
-    // CI wiring is this repository's own. preflight is lazy and only the
-    // root build asks for it, so a project depending on parallax neither
-    // needs nor fetches it.
-    if (b.lazyImport(@This(), "preflight")) |preflight| {
-        preflight.addCi(b, .{
-            .tests = test_step,
-            .portable_tests = true,
-            .bench = .{
-                .programs = &.{
-                    .{ .name = "bench", .source = "bench/main.zig" },
-                    .{ .name = "parallax-cli", .source = "bench/cli.zig", .timed = false },
-                    .{ .name = "bench-corpus", .source = "bench/corpus.zig", .timed = false },
-                },
-                .imports = benchImports,
-                .target = target,
-                .optimize = optimize,
+    tools.preflight.addCi(b, p, .{
+        .tests = test_step,
+        .portable_tests = true,
+        .bench = .{
+            .programs = &.{
+                .{ .name = "bench", .source = "bench/main.zig" },
+                .{ .name = "parallax-cli", .source = "bench/cli.zig", .timed = false },
+                .{ .name = "bench-corpus", .source = "bench/corpus.zig", .timed = false },
             },
-        });
-        // A project that depends on parallax by path, with no packages to
-        // fetch: the build a consumer gets.
-        preflight.addConsumerCheck(b, .{ .package = "parallax", .program = b.path("ci/consumer.zig"), .packages = &.{b.dependency("aegis", .{ .target = target, .optimize = optimize })} });
-    } else {
-        // Zig validates options even on the pass that discovers preflight.
-        _ = b.option(bool, "ci-lint", "Run source checks before CI tests");
-        _ = b.option(bool, "ci-timings", "Record per-test durations for the next shard balance");
-    }
+            .imports = benchImports,
+            .target = target,
+            .optimize = optimize,
+        },
+    });
+    // A project that depends on parallax by path, with no packages to
+    // fetch: the build a consumer gets.
+    tools.preflight.addConsumerCheck(b, p, .{ .package = "parallax", .program = p.path("ci/consumer.zig"), .packages = &.{aegis_dependency} });
 
     b.getInstallStep().dependOn(&tests.step);
     b.getInstallStep().dependOn(&example.step);
 }
 
+/// `b` is the development build.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
     // The benchmark harness is shakedown's; it is bound to this package's
-    // aegis, so one aegis is linked.
-    const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
-    // Until shakedown is fetched, configuration runs again once it is, so this
-    // pass builds nothing and needs only the library.
-    const shakedown = b.dependencyLazy("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer }) catch
-        return b.allocator.dupe(std.Build.Module.Import, &.{.{ .name = "parallax", .module = computationModule(b, target, optimize) }}) catch @panic("out of memory");
-    if (b.lazyImport(@This(), "shakedown")) |shakedown_build| shakedown_build.useAegis(shakedown, aegis);
+    // aegis, so one aegis is linked (the binding `useAegis` makes, which only a `dev` has the tools for).
+    const aegis = b.dependency("parallax", .{ .target = target, .optimize = optimize }).builder.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
+    shakedown.module("shakedown").addImport("aegis", aegis);
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "parallax", .module = computationModule(b, target, optimize) },
         .{ .name = "shakedown", .module = shakedown.module("shakedown") },
@@ -177,9 +174,10 @@ fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.l
 /// The library for a target, for what builds against it apart from the
 /// public module: the benchmarks and the freestanding object.
 fn computationModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) *std.Build.Module {
-    const aegis = b.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
+    const p = b.dependency("parallax", .{ .target = target, .optimize = optimize }).builder;
+    const aegis = p.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
     return b.createModule(.{
-        .root_source_file = b.path("src/parallax.zig"),
+        .root_source_file = p.path("src/parallax.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "aegis", .module = aegis }},

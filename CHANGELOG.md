@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- parallax is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, example, benchmarks and checks are the development build's (`bay test`, `bay bench`). What a project that depends on parallax builds is unchanged: the `parallax` module over aegis.
+
 ### Added
 
 - `patch.scanHunk`, `patch.HunkLines`, `patch.parseHunkHeader` and `patch.Dialect`: the grammar of one hunk on its own, for a caller that keeps the patch text and reads its own file headers. `scanHunk` checks a hunk and measures it (counts, bytes, leading and trailing context, lines added and removed, which kinds of line end in CR LF) without allocating, and `HunkLines` reads its lines back. `.gnu` is the reading `parse` has always had; `.git` is `git apply`'s, with `recount` for `--recount`.
