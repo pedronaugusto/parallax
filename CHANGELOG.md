@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
 ### Breaking
 
 - parallax is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, example, benchmarks and checks are the development build's (`bay test`, `bay bench`). What a project that depends on parallax builds is unchanged: the `parallax` module over aegis.
