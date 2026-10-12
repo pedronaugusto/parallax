@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) void {
 }
 
 /// parallax's development: its tests, example, benchmarks and checks under
-/// preflight's gate, with shakedown bound to parallax's aegis. Run through bay.
+/// preflight's gate. Run through bay.
 pub fn dev(b: *std.Build, tools: type) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -42,8 +42,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     });
     tests.root_module.addImport("aegis", aegis);
     // Bound to this package's aegis, so one aegis is linked.
-    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    tools.shakedown.useAegis(shakedown, aegis);
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize });
     tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
     // The references' output, captured once, as data: git's, GNU patch's
     // and the reference's.
@@ -160,11 +159,8 @@ pub fn dev(b: *std.Build, tools: type) void {
 
 /// `b` is the development build.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
-    // The benchmark harness is shakedown's; it is bound to this package's
-    // aegis, so one aegis is linked (the binding `useAegis` makes, which only a `dev` has the tools for).
-    const aegis = b.dependency("parallax", .{ .target = target, .optimize = optimize }).builder.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis");
-    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize, .aegis = .consumer });
-    shakedown.module("shakedown").addImport("aegis", aegis);
+    // The benchmark harness is shakedown's.
+    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "parallax", .module = computationModule(b, target, optimize) },
         .{ .name = "shakedown", .module = shakedown.module("shakedown") },
