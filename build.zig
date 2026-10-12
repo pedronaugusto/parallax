@@ -41,7 +41,6 @@ pub fn dev(b: *std.Build, tools: type) void {
         }),
     });
     tests.root_module.addImport("aegis", aegis);
-    // Bound to this package's aegis, so one aegis is linked.
     const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize });
     tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
     // The references' output, captured once, as data: git's, GNU patch's
@@ -160,10 +159,8 @@ pub fn dev(b: *std.Build, tools: type) void {
 /// `b` is the development build.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
     // The benchmark harness is shakedown's.
-    const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize });
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "parallax", .module = computationModule(b, target, optimize) },
-        .{ .name = "shakedown", .module = shakedown.module("shakedown") },
     }) catch @panic("out of memory");
 }
 
