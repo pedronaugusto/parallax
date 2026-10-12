@@ -10,56 +10,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking
 
 - parallax is developed with [bay](https://github.com/pedronaugusto/bay): preflight and shakedown are dev dependencies, and the tests, example, benchmarks and checks are the development build's (`bay test`, `bay bench`). What a project that depends on parallax builds is unchanged: the `parallax` module over aegis.
+- `parallax.diff`, `parallax.merge`, `parallax.patch`, `parallax.interner`, `parallax.lines` and `parallax.compare` are no longer separate build modules, so `b.dependency("parallax", ...).module("parallax.patch")` no longer exists. Take `module("parallax")` and use `parallax.patch` and the others as namespaces of it. Code that already wrote `@import("parallax").patch` is unchanged, and a program that names only `parallax.patch` still compiles only what that reaches.
+- `Options.max_work` and `SequenceOptions.max_work` take `Work` (Myers sweeps): construct a cap with `Work.fromRaw(n)`. `Differ.shrink` takes `Bytes`, constructed with `Bytes.fromRaw(n)`.
+- Class IDs and counts are aegis types:
+  - `Interner.intern` returns `ClassId`, `get` takes `ClassId`, and `internSlice` writes `[]ClassId`;
+  - `classes` returns `ClassCount`;
+  - `Differ.sequences` and `mergeSequences` take `[]const ClassId`, and their options take `ClassCount` for `classes`.
 
-### Added
-
-- `patch.scanHunk`, `patch.HunkLines`, `patch.parseHunkHeader` and `patch.Dialect`: the grammar of one hunk on its own, for a caller that keeps the patch text and reads its own file headers. `scanHunk` checks a hunk and measures it (counts, bytes, leading and trailing context, lines added and removed, which kinds of line end in CR LF) without allocating, and `HunkLines` reads its lines back. `.gnu` is the reading `parse` has always had; `.git` is `git apply`'s, with `recount` for `--recount`.
-
-### Changed
-
-- The Smith fuzz tests are shakedown `check` properties.
-- `parse` is built on the same grammar. A patch that ends inside a hunk reports the line that should have come next, where it reported the last one.
-
-### Breaking
-
-- `patch.apply` returns `error.InvalidResults` for a `results` slice that is not one slot per hunk, where it asserted (undefined behaviour in ReleaseFast).
-- `parallax.diff`, `parallax.merge`, `parallax.patch`, `parallax.interner`, `parallax.lines` and `parallax.compare` are no longer separate build modules: `b.dependency("parallax", ...).module("parallax.patch")` no longer exists. Take `module("parallax")` and use `parallax.patch` and the others as namespaces of it; code that already wrote `@import("parallax").patch` is unchanged. No part had a dependency or a link of its own, so a module of its own bought nothing Zig's lazy analysis does not already give: a program that names only `parallax.patch` still compiles only what that reaches.
-- `Options.max_work` and `SequenceOptions.max_work` take `Work` (Myers sweeps); construct a cap with `Work.fromRaw(n)`. `Differ.shrink` takes `Bytes`, constructed with `Bytes.fromRaw(n)`.
-- `Interner.intern` returns `ClassId`, `get` takes `ClassId`, and `internSlice` writes `[]ClassId`. `classes` returns `ClassCount`. `Differ.sequences` and `mergeSequences` take `[]const ClassId`; their options take `ClassCount` for `classes`. Import raw external IDs/counts explicitly with `fromRaw`.
-
-
-### Changed
-
-- Use published aegis for equivalence-class IDs/counts, work caps, typed scratch byte accounting and patch header integers; retain compact raw kernels behind explicit boundaries.
-- Expose the diff, merge, patch, interner, lines and comparison concerns as namespaces of the one module (`parallax.diff`, `.merge`, `.patch`, `.interner`, `.lines`, `.compare`), each declaration with one owner; the root reexports the types most callers want.
-- Pin the newest green aegis, preflight and shakedown; regenerate CI from the pinned preflight.
-- CI gates glint's A004 (raw aegis scalar operations) and Z026 (a discarded error) through the `glint` object of `ci/preflight.json`; the retired exception files are gone. `Differ` orders sizes and class ids through aegis `compare`, and checks its sequence bound in safe builds through `builtin.mode.runtimeSafety()`.
-- The benchmark baseline's 25 tests run with the rest in a `baseline-tests` root.
-
-- Property tests use shakedown generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; allocation failure sweeps use its NoResize allocator and repeated fixtures use its corpus helpers.
-- Consume shakedown unchanged from its upstream module, including its 32-bit generator fixes.
-- Regenerate the pinned workflow and every tier matrix with preflight's canonical `zig build plan -- --workflow .github/workflows/ci.yml`.
-- Pin preflight b28046c and shakedown 9357a9a, keep test dependencies lazy, ship only the library sources and package documents, and smoke-run each benchmark program through preflight.
+  Bring raw external IDs and counts in with `fromRaw`.
+- `patch.apply` returns `error.InvalidResults` for a `results` slice that is not one slot per hunk. Before, it asserted, which was undefined behaviour in ReleaseFast.
 
 ### Added
 
 - `Differ`: a reusable workspace that makes no allocation once warm, with `lines`, `sequences`, `merge` and `shrink`.
-- Line diffs with git's output: Myers with git's prune and give-up rules, minimal, patience, anchored and histogram; the slide and the indentation heuristic; `max_work`, a deterministic cap.
+- Line diffs with git's output:
+  - Myers with git's prune and give-up rules, minimal, patience, anchored and histogram;
+  - the slide and the indentation heuristic;
+  - `max_work`, a deterministic cap.
 - `Compare`: git's whitespace flags (`all`, `change`, `at_eol`, `cr_at_eol`) with git's whitespace class, and ASCII `ignore_case`.
 - `Diff` with `stat`, `ratio`, `ops` and `hunks`; `HunkOptions` with context, inter-hunk context, `ignore_blank_lines` and an `ignore` predicate.
+- `HunkOptions.function_context`: hunks widened to the whole function around their changes, as `git diff -W` widens them, by a `Heading`'s rule for where a function starts.
 - `writeUnified`, with `Heading` (`Heading.c_function` is git's default rule) and optional `---`/`+++` lines.
 - `merge`: the three-way merge as regions, in the `merge`, `diff3` and `zdiff3` styles at git's four levels; `merge.write` with labels, marker size and `Resolve`; `merge.mergeAlloc`.
-- `diffLines`, a one-shot diff that owns its memory.
-- `Interner(T, Context)` and `Differ.sequences`: any sequence diffs once interned, with the caller's anchors and indentation.
-- `Differ.refine`: the spans inside one change that differ, by `Tokens` (`words`, `chars`, `bytes`), under a `Compare`.
-- `patch.parse`: unified patches with any number of files, header lines kept verbatim, and `Diagnostics` for a malformed hunk.
-- `patch.apply`: one file's hunks applied with GNU patch's offset, fuzz, reverse and reject rules, and a result per hunk.
-- `stop` on `Options`, `SequenceOptions`, `merge.Options`, `merge.SequenceOptions` and `RefineOptions`: a flag the caller raises, from any thread, to have a diff, merge or refinement finish early with a coarse result that is still correct.
-- `HunkOptions.function_context`: hunks widened to the whole function around their changes, as `git diff -W` widens them, by a `Heading`'s rule for where a function starts.
-- `RefineOptions.cleanup` (`Cleanup.semantic`, `Cleanup.efficiency`) and `RefineOptions.edit_cost`: the reference's cleanups over the token script before it becomes spans.
 - `merge.parseMarkers`: the text and conflicts of marked text, read back as git's rerere reads them, with each side, the base when there is one, and the labels.
-- `Differ.mergeSequences`, with `merge.SequenceOptions` and `merge.SequenceMerge`: the three-way merge of any interned sequences, as regions, in every style and level.
-- `ApplyOptions.reversed_hint`: whether a patch looks reversed or already applied, where GNU patch would say so.
-- `zig build bench-corpus`, which collects the changed files of a range of a git history (Linux v6.11..v6.12 by default) for the benchmarks on real files, and `bench/cli`, a small command that diffs, merges and applies.
+- `diffLines`, a one-shot diff that owns its memory.
+- `Interner(T, Context)` and `Differ.sequences`: any sequence diffs once interned, with the caller's anchors and indentation. `Differ.mergeSequences`, with `merge.SequenceOptions` and `merge.SequenceMerge`, merges them three ways in every style and level.
+- `Differ.refine`: the spans inside one change that differ, by `Tokens` (`words`, `chars`, `bytes`), under a `Compare`. `RefineOptions.cleanup` (`Cleanup.semantic`, `Cleanup.efficiency`) and `RefineOptions.edit_cost` clean up the token script before it becomes spans.
+- `stop` on `Options`, `SequenceOptions`, `merge.Options`, `merge.SequenceOptions` and `RefineOptions`: a flag the caller raises, from any thread, to have a diff, merge or refinement finish early with a coarse result that is still correct.
+- `patch.parse`: unified patches with any number of files, header lines kept verbatim, and `Diagnostics` for a malformed hunk.
+- `patch.apply`: one file's hunks applied with GNU patch's offset, fuzz, reverse and reject rules, and a result per hunk. `ApplyOptions.reversed_hint` says whether a patch looks reversed or already applied, where GNU patch would say so.
+- `patch.scanHunk`, `patch.HunkLines`, `patch.parseHunkHeader` and `patch.Dialect`: the grammar of one hunk on its own, for a caller that keeps the patch text and reads its own file headers.
+  - `scanHunk` checks a hunk and measures it without allocating: counts, bytes, leading and trailing context, lines added and removed, and which kinds of line end in CR LF.
+  - `HunkLines` reads its lines back.
+  - `.gnu` is the reading `parse` has always had; `.git` is `git apply`'s, with `recount` for `--recount`.
+- `zig build bench-corpus` collects the changed files of a range of a git history (Linux v6.11..v6.12 by default) for the benchmarks on real files. `bench/cli` is a small command that diffs, merges and applies.
+
+### Changed
+
+- `parse` is built on the one-hunk grammar. A patch that ends inside a hunk reports the line that should have come next, where it reported the last one.
+- `Differ` orders sizes and class IDs through aegis's `compare`, and checks its sequence bound in every build with runtime safety.
+- Property tests use shakedown's generators and checks with the same seeds, assertions and case counts, with shrinking and tape replay; the fuzz tests are shakedown `check` properties.
+- Pins aegis 0.1.0.
 
 [Unreleased]: https://github.com/pedronaugusto/parallax/commits/main
