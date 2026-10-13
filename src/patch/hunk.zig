@@ -426,3 +426,26 @@ test "a scan says which kinds of line end in CR LF, and a marker takes a line's 
     try std.testing.expect(!bare.crlf.context);
     try std.testing.expect(bare.crlf.removed);
 }
+
+test "fuzz: a hunk header GNU reads, git reads the same, and a heading lies inside the line" {
+    const shakedown = @import("shakedown");
+    const examples = [_][]const u8{ "@@ -1,4 +1,5 @@ fn main\n", "@@ -1 +1 @@x\n", "@@ -4294967295,0 +4294967295,0 @@", "@@ -0,0 +1 @@", "@@ -1,2 +3,4" };
+    const property = struct {
+        fn holds(line: []const u8) !void {
+            const git = parseHeader(line, .git);
+            if (git) |header| try std.testing.expect(header.heading.len == 0 or (@intFromPtr(header.heading.ptr) >= @intFromPtr(line.ptr) and @intFromPtr(header.heading.ptr) + header.heading.len <= @intFromPtr(line.ptr) + line.len));
+            const gnu = parseHeader(line, .gnu) orelse return;
+            const wider = git orelse return error.TestUnexpectedResult;
+            try std.testing.expectEqual(gnu.old_start, wider.old_start);
+            try std.testing.expectEqual(gnu.old_len, wider.old_len);
+            try std.testing.expectEqual(gnu.new_start, wider.new_start);
+            try std.testing.expectEqual(gnu.new_len, wider.new_len);
+        }
+        fn body(_: void, c: *shakedown.Case) !void {
+            var buffer: [64]u8 = undefined;
+            try holds(shakedown.gen.mutated(c.source, &buffer, &examples));
+        }
+    };
+    for (examples) |example| try property.holds(example);
+    try shakedown.check(std.testing.allocator, {}, property.body, .{});
+}
