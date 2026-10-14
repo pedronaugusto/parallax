@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-14
+
 ### Added
 
 - A fuzz property for `patch.hunk.parseHeader`, the one parser of untrusted input preflight reported without one: a header GNU's reading accepts, git's reads with the same numbers, and a heading lies inside its line.
