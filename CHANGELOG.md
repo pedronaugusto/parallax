@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `UnifiedOptions.suppress_blank_empty`: a context line that is a line ending alone is written without its space, as git writes it under `diff.suppressBlankEmpty`.
+
 ## [0.2.4] - 2026-10-14
 
 ### Added

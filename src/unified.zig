@@ -18,6 +18,9 @@ pub const UnifiedOptions = struct {
     /// Written as "--- {old}\n+++ {new}\n" before the first hunk; null is the
     /// body only.
     files: ?struct { old: []const u8, new: []const u8 } = null,
+    /// A context line that is a line ending alone is written without its
+    /// space, as git writes it under `diff.suppressBlankEmpty`.
+    suppress_blank_empty: bool = false,
 };
 
 /// Write `diff` as a unified diff. Context lines come from the new side, as
@@ -56,11 +59,11 @@ pub fn writeUnified(w: *Io.Writer, diff: Diff, options: UnifiedOptions) Io.Write
         // The context before the first change is the new side's, counted
         // there, as git prints it; between changes both sides step.
         var new_at = hunk.new_start;
-        while (new_at < hunk.changes[0].new_start) : (new_at += 1) try writeLine(w, ' ', diff.new.get(new_at));
+        while (new_at < hunk.changes[0].new_start) : (new_at += 1) try writeContext(w, options, diff.new.get(new_at));
         var old_at = hunk.changes[0].old_start;
         for (hunk.changes) |c| {
             while (old_at < c.old_start and new_at < c.new_start) {
-                try writeLine(w, ' ', diff.new.get(new_at));
+                try writeContext(w, options, diff.new.get(new_at));
                 old_at += 1;
                 new_at += 1;
             }
@@ -70,7 +73,7 @@ pub fn writeUnified(w: *Io.Writer, diff: Diff, options: UnifiedOptions) Io.Write
             new_at = c.new_start + c.new_len;
         }
         while (new_at < hunk.new_start + hunk.new_len) {
-            try writeLine(w, ' ', diff.new.get(new_at));
+            try writeContext(w, options, diff.new.get(new_at));
             new_at += 1;
         }
     }
@@ -82,6 +85,11 @@ fn writeRange(w: *Io.Writer, start: u32, count: u32) Io.Writer.Error!void {
     if (count == 0) return w.print("{d},0", .{start});
     if (count == 1) return w.print("{d}", .{@as(u64, start) + 1});
     try w.print("{d},{d}", .{ @as(u64, start) + 1, count });
+}
+
+fn writeContext(w: *Io.Writer, options: UnifiedOptions, line: []const u8) Io.Writer.Error!void {
+    if (options.suppress_blank_empty and std.mem.eql(u8, line, "\n")) return w.writeByte('\n');
+    try writeLine(w, ' ', line);
 }
 
 fn writeLine(w: *Io.Writer, prefix: u8, line: []const u8) Io.Writer.Error!void {

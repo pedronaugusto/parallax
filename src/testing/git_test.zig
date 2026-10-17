@@ -126,6 +126,18 @@ test "unified bodies are byte for byte what git prints, under every flag" {
     try std.testing.expectEqual(@as(usize, 1483), count);
 }
 
+test "a blank context line loses its space under suppress_blank_empty, as git diff.suppressBlankEmpty prints it" {
+    var d: parallax.Differ = .init(std.testing.allocator);
+    defer d.deinit();
+    const diff = try d.lines("a\n\n \nb\n", "a\n\n \nc\n", .{});
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    try parallax.writeUnified(&out.writer, diff, .{ .suppress_blank_empty = true });
+    // `git -c diff.suppressBlankEmpty=true diff --no-index`, 2.55: a line
+    // of one space keeps its sign.
+    try std.testing.expectEqualStrings("@@ -1,4 +1,4 @@\n a\n\n  \n-b\n+c\n", out.written());
+}
+
 test "whole-function hunks are what git diff -W prints" {
     const c = try corpus.Corpus.parse(function_corpus);
     try std.testing.expectEqualStrings("git version 2.55.0", c.git_version);
