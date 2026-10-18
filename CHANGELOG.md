@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-10-18
+
 ### Added
 
 - `UnifiedOptions.paint`: a `Paint` that is handed each line of the unified diff, what it is (the file names, the `@@` ranges and heading, context, removed and added lines, `\ No newline at end of file`), its sign and its number on its side, and writes it in place of the plain writer: how a caller colours a diff, as git's `--color` does.
