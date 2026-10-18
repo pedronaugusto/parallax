@@ -83,6 +83,31 @@ fn expectBody(d: *parallax.Differ, flags: *DiffFlags, old: []const u8, new: []co
     defer out.deinit();
     try parallax.writeUnified(&out.writer, diff, flags.unified);
     try std.testing.expectEqualStrings(expected, out.written());
+    // A painter that writes each line as it is given writes the same bytes.
+    out.clearRetainingCapacity();
+    var painted = flags.unified;
+    painted.paint = .{ .write = writePlain };
+    try parallax.writeUnified(&out.writer, diff, painted);
+    try std.testing.expectEqualStrings(expected, out.written());
+}
+
+/// A `Paint` that writes every line as the plain writer does.
+fn writePlain(_: ?*const anyopaque, w: *std.Io.Writer, line: parallax.Paint.Line) std.Io.Writer.Error!void {
+    switch (line.kind) {
+        .old_file => try w.print("--- {s}\n", .{line.text}),
+        .new_file => try w.print("+++ {s}\n", .{line.text}),
+        .hunk => {
+            try w.writeAll(line.text);
+            if (line.heading.len != 0) try w.print(" {s}", .{line.heading});
+            try w.writeByte('\n');
+        },
+        .incomplete => try w.writeAll(line.text),
+        .context, .old, .new => {
+            if (line.sign != 0) try w.writeByte(line.sign);
+            try w.writeAll(line.text);
+            if (!std.mem.endsWith(u8, line.text, "\n")) try w.writeByte('\n');
+        },
+    }
 }
 
 test "edit scripts land on the lines git's do, under every algorithm" {

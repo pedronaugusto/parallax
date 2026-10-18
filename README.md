@@ -182,6 +182,8 @@ one, and changes in one function share a hunk, as git's do (git's hunks then
 sometimes overlap, and so do these). `writeUnified` writes the `@@` lines, the
 heading a `Heading` finds (`Heading.c_function` is git's default rule), context
 taken from the new side as git prints it, and `\ No newline at end of file`.
+A `Paint` in its options is handed each line, what it is and its sign, and
+writes it instead: how a caller colours the diff, as git's `--color` does.
 
 ### Sequences and refinement
 
@@ -275,7 +277,7 @@ marker alone on its line, which `write` writes for an empty label.
 | `diffLines(gpa, old, new, options)` | A one-shot diff that owns its memory |
 | `diff.stat()`, `diff.ratio()` | Lines added and removed; the matched share of both sides |
 | `diff.ops()`, `diff.hunks(options)` | The script as steps, and as hunks; neither allocates |
-| `writeUnified(w, diff, options)` | The unified body, optionally with `---`/`+++` lines |
+| `writeUnified(w, diff, options)` | The unified body, optionally with `---`/`+++` lines, each line through a `Paint` where one is given |
 | `merge.write(w, merge, options)` | The merged text with labels, marker size and resolution |
 | `merge.mergeAlloc(gpa, base, ours, theirs, options, write_options)` | Merge and write in one call |
 | `merge.parseMarkers(text, options)` | The text and conflicts of marked text, one part at a time |

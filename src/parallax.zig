@@ -59,6 +59,8 @@ pub const HunkIterator = diff.HunkIterator;
 pub const Heading = diff.Heading;
 /// How the unified writer writes.
 pub const UnifiedOptions = diff.UnifiedOptions;
+/// A caller that writes each line of a unified diff itself: colour.
+pub const Paint = diff.Paint;
 /// Write a diff as a unified diff body, as git prints it.
 pub const writeUnified = diff.writeUnified;
 /// An equivalence class, distinct from a sequence position.
