@@ -13,7 +13,6 @@ const Allocator = std.mem.Allocator;
 const compare_mod = @import("compare.zig");
 const Compare = compare_mod.Compare;
 const lines_mod = @import("lines.zig");
-const Lines = lines_mod.Lines;
 const table_mod = @import("table.zig");
 const fit = @import("fit.zig");
 const change_mod = @import("change.zig");

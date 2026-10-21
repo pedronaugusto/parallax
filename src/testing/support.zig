@@ -7,7 +7,6 @@ const compare = @import("../compare.zig");
 
 const shakedown = @import("shakedown");
 const gen = shakedown.gen;
-const Change = parallax.Change;
 
 const pieces = [_][]const u8{ "a", "b", "c", " ", "\t", "\r", "{", "}", "  x", "A" };
 const Line = struct { count: u2, parts: [3][]const u8 };

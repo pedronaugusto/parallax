@@ -1,7 +1,6 @@
 //! What a parsed unified patch holds.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const Compare = @import("../compare.zig").Compare;
 
 /// One line of a hunk.
