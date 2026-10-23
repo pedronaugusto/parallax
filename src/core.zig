@@ -33,6 +33,9 @@ comptime {
     std.debug.assert(@sizeOf(KernelWork) == @sizeOf(u64));
 }
 
+/// What a diff can fail with: memory, or the caller's task canceled.
+pub const Error = myers.Error;
+
 pub const Run = struct {
     algorithm: Algorithm,
     minimal: bool,
@@ -40,6 +43,7 @@ pub const Run = struct {
     classes: u32,
     indent_heuristic: bool,
     stop: ?*const std.atomic.Value(bool) = null,
+    io: ?std.Io = null,
 };
 
 /// `Source` has `fn anchor(Source, u32) bool` for old lines and
@@ -54,7 +58,7 @@ pub fn diff(
     b: []const u32,
     run: Run,
     out: *std.ArrayList(Change),
-) Allocator.Error!u64 {
+) Error!u64 {
     try fit.resize(gpa, &bufs.flags_a, a.len + 2);
     try fit.resize(gpa, &bufs.flags_b, b.len + 2);
     const fa: Flags = .whole(bufs.flags_a.items, @intCast(a.len));
@@ -66,6 +70,7 @@ pub fn diff(
         // aegis: measured-boundary: docs/design.md#numeric-boundaries; validated sweep cap enters the raw one-unit search kernel.
         .max_work = run.max_work.raw(),
         .stop = run.stop,
+        .io = run.io,
         .buffers = &bufs.myers,
     };
 

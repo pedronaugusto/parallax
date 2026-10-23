@@ -4,8 +4,9 @@
 //! patience, anchored, histogram, the slide and the indentation heuristic,
 //! the whitespace flags, hunks and the unified body, the three-way merge in
 //! the merge, diff3 and zdiff3 styles), on dense ids, with a reusable
-//! workspace that allocates nothing once warm. No Io: every function is
-//! pure computation.
+//! workspace that allocates nothing once warm. No I/O: every function is
+//! pure computation, and a caller's `Io`, when given, is asked only whether
+//! the calling task is canceled.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -78,6 +79,9 @@ const refine = @import("refine.zig");
 pub const Tokens = refine.Tokens;
 /// How `Differ.refine` diffs tokens.
 pub const RefineOptions = refine.RefineOptions;
+/// What `Differ.refine` can fail with: memory, or the caller's task
+/// canceled.
+pub const RefineError = refine.Error;
 /// the reference's cleanups, for `RefineOptions.cleanup`.
 pub const Cleanup = refine.Cleanup;
 /// Bytes of one side, changed or not.

@@ -59,6 +59,11 @@ pub const Options = struct {
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
     stop: ?*const std.atomic.Value(bool) = null,
+    /// The caller's Io. When given, the call asks it once per work unit and
+    /// once per histogram or patience region whether the calling task is
+    /// canceled, and returns `error.Canceled` if so: the call is abandoned,
+    /// where `stop` still returns a result.
+    io: ?std.Io = null,
 };
 
 pub const Range = struct { start: u32, len: u32 };
@@ -132,6 +137,8 @@ pub const SequenceOptions = struct {
     content: ?core.Predicate = null,
     /// As `Options.stop`.
     stop: ?*const std.atomic.Value(bool) = null,
+    /// As `Options.io`.
+    io: ?std.Io = null,
 };
 
 /// A merge of id sequences: regions over the three sequences, as `Merge`
@@ -167,12 +174,13 @@ pub const Input = struct {
     style: Style,
     level: Level,
     stop: ?*const std.atomic.Value(bool),
+    io: ?std.Io,
 };
 
 /// The merge whose scripts against the base are `xs1` (ours) and `xs2`
 /// (theirs), neither empty, as regions in `in.buffers.regions`. Returns the
 /// number of conflicts.
-pub fn solve(in: Input, xs1: []const Change, xs2: []const Change) Allocator.Error!u32 {
+pub fn solve(in: Input, xs1: []const Change, xs2: []const Change) core.Error!u32 {
     const b = in.buffers;
     b.hunks.clearRetainingCapacity();
     b.same.clearRetainingCapacity();
@@ -296,7 +304,7 @@ fn walk(in: Input, level: Level, xs1: []const Change, xs2: []const Change) Alloc
 /// `xdl_refine_conflicts`: diff the two sides of each conflict against each
 /// other and keep only the runs where they differ as conflicts. Nothing is
 /// refined when one side is empty.
-fn refine(in: Input) Allocator.Error!void {
+fn refine(in: Input) core.Error!void {
     const hunks = &in.buffers.hunks;
     const out = &in.buffers.refine;
     var at: usize = 0;
@@ -313,6 +321,7 @@ fn refine(in: Input) Allocator.Error!void {
             .classes = in.classes,
             .indent_heuristic = false,
             .stop = in.stop,
+            .io = in.io,
         }, out);
         if (out.items.len == 0) {
             hunks.items[at].mode = .identical;

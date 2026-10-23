@@ -63,13 +63,14 @@ pub fn diff(
     b: []const u32,
     fa: Flags,
     fb: Flags,
-) Allocator.Error!void {
+) myers.Error!void {
     const gpa = c.gpa;
     if (p.slot_of.items.len < c.classes) try fit.resize(gpa, &p.slot_of, c.classes);
     var s: State(Anchor) = .{ .anchor = anchor, .c = c, .p = p, .a = a, .b = b, .fa = fa, .fb = fb };
     p.todo.clearRetainingCapacity();
     try p.todo.append(gpa, .{ .line1 = 0, .count1 = @intCast(a.len), .line2 = 0, .count2 = @intCast(b.len) });
     while (p.todo.pop()) |r| {
+        try c.checkCancel();
         // Asked to stop: what is left is one deletion and one insertion
         // per region.
         if (c.stop != null and c.stopped()) {
@@ -93,7 +94,7 @@ fn State(comptime Anchor: type) type {
 
         const Self = @This();
 
-        fn region(s: *Self, r: Region) Allocator.Error!void {
+        fn region(s: *Self, r: Region) myers.Error!void {
             if (r.count1 == 0) {
                 if (r.count2 != 0) s.fb.setRange(r.line2, r.count2);
                 return;
@@ -203,7 +204,7 @@ fn State(comptime Anchor: type) type {
 
         /// Grow each backbone line over the equal lines around it, and queue
         /// the gaps between.
-        fn walk(s: *Self, r: Region, backbone: []const u32) Allocator.Error!void {
+        fn walk(s: *Self, r: Region, backbone: []const u32) myers.Error!void {
             const slots = s.p.slots.items;
             const end1 = r.line1 + r.count1;
             const end2 = r.line2 + r.count2;

@@ -13,6 +13,8 @@ const change_mod = @import("change.zig");
 const Change = change_mod.Change;
 const Algorithm = change_mod.Algorithm;
 const core = @import("core.zig");
+/// What a refinement can fail with: memory, or the caller's task canceled.
+pub const Error = core.Error;
 const Interner = @import("interner.zig").Interner;
 const cleanup_mod = @import("cleanup.zig");
 
@@ -49,6 +51,11 @@ pub const RefineOptions = struct {
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
     stop: ?*const std.atomic.Value(bool) = null,
+    /// The caller's Io. When given, the call asks it once per work unit and
+    /// once per histogram or patience region whether the calling task is
+    /// canceled, and returns `error.Canceled` if so: the call is abandoned,
+    /// where `stop` still returns a result.
+    io: ?std.Io = null,
 };
 
 /// Bytes `start .. start + len` of a side's text, changed or not.
@@ -150,7 +157,7 @@ pub const Input = struct {
     options: RefineOptions,
 };
 
-pub fn refine(in: Input) Allocator.Error!Refined {
+pub fn refine(in: Input) Error!Refined {
     const b = in.buffers;
     const c = in.change;
     for (&b.spans) |*s| s.clearRetainingCapacity();
@@ -203,6 +210,7 @@ pub fn refine(in: Input) Allocator.Error!Refined {
         .classes = interner.classes().raw(),
         .indent_heuristic = false,
         .stop = in.options.stop,
+        .io = in.options.io,
     }, &b.changes);
     try cleanup_mod.run(.{
         .gpa = in.gpa,

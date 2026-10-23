@@ -15,6 +15,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+/// What a search can fail with: memory, or the caller's task canceled.
+pub const Error = Allocator.Error || std.Io.Cancelable;
 /// Change flags shared by the algorithm entry points.
 pub const Flags = @import("flags.zig").Flags;
 const fit = @import("fit.zig");
@@ -80,6 +82,10 @@ pub const Context = struct {
     /// A caller's flag: once it reads true, what is left is described
     /// coarsely, as when `max_work` runs out.
     stop: ?*const std.atomic.Value(bool) = null,
+    /// The caller's Io: once per work unit and once per region the search
+    /// asks it whether the calling task is canceled, and ends with
+    /// `error.Canceled` if so.
+    io: ?std.Io = null,
     buffers: *Buffers,
 
     /// Whether the caller has asked the diff to stop. Read once per work
@@ -89,10 +95,18 @@ pub const Context = struct {
         return flag.load(.monotonic);
     }
 
-    /// Whether a cap or a stop flag can end the search early. Neither is,
-    /// most of the time, and then a work unit costs one test of this.
+    /// `error.Canceled` when the caller's task is canceled. Asked once per
+    /// work unit and once per region.
+    pub fn checkCancel(c: *const Context) std.Io.Cancelable!void {
+        const io = c.io orelse return;
+        return io.checkCancel();
+    }
+
+    /// Whether a cap, a stop flag or a cancellation can end the search
+    /// early. None can, most of the time, and then a work unit costs one
+    /// test of this.
     fn bounded(c: *const Context) bool {
-        return c.max_work != 0 or c.stop != null;
+        return c.max_work != 0 or c.stop != null or c.io != null;
     }
 
     /// Whether the cap is reached or the caller asked to stop: the search
@@ -108,7 +122,7 @@ pub const Context = struct {
 /// come from, then the search. Patience and histogram call this on a region
 /// as if the region were a pair of files, which is git's fallback. The flags
 /// are written only to set lines.
-pub fn whole(c: *Context, a: []const u32, b: []const u32, fa: Flags, fb: Flags) Allocator.Error!void {
+pub fn whole(c: *Context, a: []const u32, b: []const u32, fa: Flags, fb: Flags) Error!void {
     const bufs = c.buffers;
     var start: usize = 0;
     while (start < a.len and start < b.len and a[start] == b[start]) start += 1;
@@ -158,7 +172,7 @@ fn countLines(counts: []u32, a: []const u32, b: []const u32) void {
     }
 }
 
-noinline fn run(comptime Int: type, c: *Context, kvd: *std.ArrayList(Int), ndiags: u64, fa: Flags, fb: Flags) Allocator.Error!void {
+noinline fn run(comptime Int: type, c: *Context, kvd: *std.ArrayList(Int), ndiags: u64, fa: Flags, fb: Flags) Error!void {
     const bufs = c.buffers;
     try fit.resize(c.gpa, kvd, @intCast(2 * ndiags));
     const n: usize = @intCast(ndiags);
@@ -367,7 +381,7 @@ fn Search(comptime Int: type) type {
 
         /// Split every box at a middle snake until none is left, taking
         /// boxes in the order a recursion would.
-        fn all(s: *Self, stack: *std.ArrayList(Box), lim1: u32, lim2: u32, need_min: bool) Allocator.Error!void {
+        fn all(s: *Self, stack: *std.ArrayList(Box), lim1: u32, lim2: u32, need_min: bool) Error!void {
             const gpa = s.context.gpa;
             stack.clearRetainingCapacity();
             try stack.append(gpa, .{ .off1 = 0, .lim1 = lim1, .off2 = 0, .lim2 = lim2, .need_min = need_min });
@@ -392,7 +406,7 @@ fn Search(comptime Int: type) type {
                     s.markA(off1, l1);
                     continue;
                 }
-                const split = s.middleSnake(off1, l1, off2, l2, box.need_min) orelse {
+                const split = try s.middleSnake(off1, l1, off2, l2, box.need_min) orelse {
                     s.markA(off1, l1);
                     s.markB(off2, l2);
                     continue;
@@ -422,8 +436,9 @@ fn Search(comptime Int: type) type {
         /// Where the edit script through this box crosses it: run the greedy
         /// search from both corners until the frontiers touch, or until one
         /// of git's give-up rules fires. Null when `max_work` ran out or the
-        /// caller asked the diff to stop.
-        fn middleSnake(s: *Self, off1: u32, lim1: u32, off2: u32, lim2: u32, need_min: bool) ?Split {
+        /// caller asked the diff to stop; `error.Canceled` when the caller's
+        /// task is canceled.
+        fn middleSnake(s: *Self, off1: u32, lim1: u32, off2: u32, lim2: u32, need_min: bool) std.Io.Cancelable!?Split {
             const c = s.context;
             const o1: Int = @intCast(off1);
             const l1: Int = @intCast(lim1);
@@ -448,7 +463,10 @@ fn Search(comptime Int: type) type {
             const bounded = c.bounded();
             var ec: u64 = 1;
             while (true) : (ec += 1) {
-                if (bounded and c.exhausted()) return null;
+                if (bounded) {
+                    try c.checkCancel();
+                    if (c.exhausted()) return null;
+                }
                 c.work += 1;
                 var got_snake = false;
 

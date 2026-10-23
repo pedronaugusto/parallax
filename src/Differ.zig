@@ -50,7 +50,7 @@ pub const Work = core.Work;
 /// Retained storage in bytes.
 pub const Bytes = fit.Bytes;
 
-pub const Error = error{ OutOfMemory, InputTooLarge };
+pub const Error = error{ OutOfMemory, InputTooLarge, Canceled };
 
 /// How a line diff is taken.
 pub const Options = struct {
@@ -76,6 +76,11 @@ pub const Options = struct {
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
     stop: ?*const std.atomic.Value(bool) = null,
+    /// The caller's Io. When given, the call asks it once per work unit and
+    /// once per histogram or patience region whether the calling task is
+    /// canceled, and returns `error.Canceled` if so: the call is abandoned,
+    /// where `stop` still returns a result.
+    io: ?std.Io = null,
 };
 
 /// A caller's test of one position of the old sequence.
@@ -104,6 +109,11 @@ pub const SequenceOptions = struct {
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
     stop: ?*const std.atomic.Value(bool) = null,
+    /// The caller's Io. When given, the call asks it once per work unit and
+    /// once per histogram or patience region whether the calling task is
+    /// canceled, and returns `error.Canceled` if so: the call is abandoned,
+    /// where `stop` still returns a result.
+    io: ?std.Io = null,
 };
 
 pub fn init(gpa: Allocator) Differ {
@@ -238,6 +248,7 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
         .classes = classes,
         .indent_heuristic = options.indent_heuristic,
         .stop = options.stop,
+        .io = options.io,
     }, &d.changes);
     var r = result;
     r.changes = d.changes.items;
@@ -265,6 +276,7 @@ pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const cl
         .classes = options.classes.raw(),
         .indent_heuristic = options.indent != null,
         .stop = options.stop,
+        .io = options.io,
     }, &d.changes);
     return d.changes.items;
 }
@@ -299,6 +311,7 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
         .classes = classes,
         .indent_heuristic = false,
         .stop = options.stop,
+        .io = options.io,
     };
     d.changes.clearRetainingCapacity();
     d.changes_theirs.clearRetainingCapacity();
@@ -328,6 +341,7 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
         .style = options.style,
         .level = options.level,
         .stop = options.stop,
+        .io = options.io,
     }, d.changes.items, d.changes_theirs.items);
     result.regions = regions.items;
     return result;
@@ -360,6 +374,7 @@ pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []co
         .classes = options.classes.raw(),
         .indent_heuristic = false,
         .stop = options.stop,
+        .io = options.io,
     };
     d.changes.clearRetainingCapacity();
     d.changes_theirs.clearRetainingCapacity();
@@ -387,6 +402,7 @@ pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []co
         .style = options.style,
         .level = options.level,
         .stop = options.stop,
+        .io = options.io,
     }, d.changes.items, d.changes_theirs.items);
     return .{ .regions = regions.items, .conflicts = conflicts };
 }
@@ -408,7 +424,7 @@ fn whole(d: *Differ, kind: threeway.Region.Kind, lens: [3]u32) Allocator.Error!v
 /// Which bytes inside one change of `diff` (a replace) differ, as spans of
 /// tokens, for inline highlighting. `diff` may come from an earlier call on
 /// `d`: refining does not disturb it. Valid until the next call on `d`.
-pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.RefineOptions) Allocator.Error!refine_mod.Refined {
+pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.RefineOptions) refine_mod.Error!refine_mod.Refined {
     return refine_mod.refine(.{
         .gpa = d.gpa,
         .core = &d.scratch,

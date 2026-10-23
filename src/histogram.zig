@@ -35,7 +35,7 @@ pub const Buffers = struct {
 /// A region still to diff: one-based lines, as `histogram_diff` takes them.
 pub const Region = struct { line1: u64, count1: u64, line2: u64, count2: u64 };
 
-pub fn diff(c: *myers.Context, h: *Buffers, a: []const u32, b: []const u32, fa: Flags, fb: Flags) Allocator.Error!void {
+pub fn diff(c: *myers.Context, h: *Buffers, a: []const u32, b: []const u32, fa: Flags, fb: Flags) myers.Error!void {
     const gpa = c.gpa;
     const old = h.stamp.items.len;
     if (old < c.classes) {
@@ -48,6 +48,7 @@ pub fn diff(c: *myers.Context, h: *Buffers, a: []const u32, b: []const u32, fa: 
     h.stack.clearRetainingCapacity();
     try h.stack.append(gpa, .{ .line1 = 1, .count1 = a.len, .line2 = 1, .count2 = b.len });
     while (h.stack.pop()) |r| {
+        try c.checkCancel();
         // Asked to stop: what is left is one deletion and one insertion
         // per region.
         if (c.stop != null and c.stopped()) {
@@ -78,7 +79,7 @@ const State = struct {
         if (count != 0) s.fb.setRange(@intCast(line - 1), @intCast(count));
     }
 
-    fn region(s: *State, r: Region) Allocator.Error!void {
+    fn region(s: *State, r: Region) myers.Error!void {
         if (r.count1 == 0 and r.count2 == 0) return;
         if (r.count1 == 0) return s.markB(r.line2, r.count2);
         if (r.count2 == 0) return s.markA(r.line1, r.count1);
@@ -207,7 +208,7 @@ pub fn fallBack(
     fb: Flags,
     start_b: u64,
     count_b: u64,
-) Allocator.Error!void {
+) myers.Error!void {
     const sa: u32 = @intCast(start_a);
     const na: u32 = @intCast(count_a);
     const sb: u32 = @intCast(start_b);

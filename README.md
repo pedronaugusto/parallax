@@ -8,8 +8,9 @@ histogram, the same hunks and unified body, and the same merged text in the
 merge, diff3 and zdiff3 styles. The same algorithms diff and merge any sequence
 and refine a changed line down to the words or characters that differ, conflict
 markers read back as git's rerere reads them, and unified patches parse and apply
-with GNU patch's offset and fuzz rules. It has no Io: every call is pure
-computation, and a reusable workspace makes no allocation once it is warm.
+with GNU patch's offset and fuzz rules. It does no I/O: every call is pure
+computation, a caller's `Io`, when given, is asked only whether the task is
+canceled, and a reusable workspace makes no allocation once it is warm.
 
 ## Install
 

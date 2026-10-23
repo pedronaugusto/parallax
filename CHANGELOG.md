@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Options.io`, `SequenceOptions.io`, `MergeOptions.io`, `MergeSequenceOptions.io` and `RefineOptions.io`: the caller's `Io`, asked once per work unit and once per histogram or patience region whether the calling task is canceled. Once it is, the call returns `error.Canceled` and is abandoned, where `stop` still returns a result, correct but coarse. Tested on `std.Io.Threaded` and on reactor's evented runtime.
+
+### Changed
+
+- **Breaking:** `Differ.Error` gains `Canceled`, and `Differ.refine` returns `RefineError` (`OutOfMemory`, `Canceled`). Neither is returned when no `io` is given.
+- Pins aegis 0.1.12; the tests' shakedown is 0.4.16, and reactor 0.8.1 joins it as a development dependency.
+
 ## [0.2.6] - 2026-10-18
 
 ### Added

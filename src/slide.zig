@@ -97,7 +97,7 @@ pub fn compact(
     ids: []const u32,
     other: Flags,
     rediff: ?Rediff,
-) Allocator.Error!void {
+) myers.Error!void {
     var g = groupInit(f);
     var go = groupInit(other);
 

@@ -57,7 +57,8 @@
     ]
   ],
   "test_dependencies": [
-    "shakedown"
+    "shakedown",
+    "reactor"
   ],
   "glint_paths": [
     "src",

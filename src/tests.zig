@@ -8,4 +8,5 @@ test {
     _ = @import("testing/refine_test.zig");
     _ = @import("testing/patch_test.zig");
     _ = @import("testing/cleanup_test.zig");
+    _ = @import("testing/cancel_test.zig");
 }

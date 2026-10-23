@@ -43,6 +43,9 @@ pub fn dev(b: *std.Build, tools: type) void {
     tests.root_module.addImport("aegis", aegis);
     const shakedown = b.dependency("shakedown", .{ .target = target, .optimize = optimize });
     tests.root_module.addImport("shakedown", shakedown.module("shakedown"));
+    // The evented backend the cancellation tests run on beside Threaded.
+    const reactor = b.dependency("reactor", .{ .target = target, .optimize = optimize });
+    tests.root_module.addImport("reactor", reactor.module("reactor"));
     // The references' output, captured once, as data: git's, GNU patch's
     // and the reference's.
     for ([_][]const u8{
