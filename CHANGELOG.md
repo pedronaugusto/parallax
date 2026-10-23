@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
 ### Added
 
 - `Options.io`, `SequenceOptions.io`, `MergeOptions.io`, `MergeSequenceOptions.io` and `RefineOptions.io`: the caller's `Io`, asked once per work unit and once per histogram or patience region whether the calling task is canceled. Once it is, the call returns `error.Canceled` and is abandoned, where `stop` still returns a result, correct but coarse. Tested on `std.Io.Threaded` and on reactor's evented runtime.
