@@ -140,6 +140,8 @@ pub fn dev(b: *std.Build, tools: type) void {
     tools.preflight.addCi(b, p, .{
         .tests = test_step,
         .portable_tests = true,
+        // bench-corpus's smoke run builds a git repository, the riscv64 machine's too.
+        .vm_packages = &.{"git"},
         .bench = .{
             .programs = &.{
                 .{ .name = "bench", .source = "bench/main.zig" },
