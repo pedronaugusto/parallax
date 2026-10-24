@@ -8,7 +8,8 @@
 //!
 //! - W1: 1M lines, ten edits; W2: 1M lines, 10% and 50% edited;
 //! - W3a-W3f: the adversarial shapes; W2 and W3b again with a stop flag
-//!   that is never raised, for what reading it costs;
+//!   that is never raised and with an io never canceled, for what reading
+//!   each costs;
 //! - W4: every changed file of a real history (`--corpus`, made by
 //!   `zig build bench-corpus`), per-file latency and allocations; W4L: the
 //!   files of 1 MB and more; W7a: the merges of its merge commits;
@@ -178,8 +179,9 @@ pub fn main(init: std.process.Init) !void {
     if (config.wants("W10")) try functions(r, gpa, &d, config);
 }
 
-/// W2 at 10% and W3b again with a stop flag that is never raised: what
-/// reading it once per work unit costs.
+/// W2 at 10% and W3b again with a stop flag that is never raised, and with
+/// an io whose task is never canceled: what reading each once per work
+/// unit costs.
 fn stopRows(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines: usize, w3b: gen.Pair) !void {
     const w2 = try gen.w2(gpa, lines, 0.1);
     defer w2.deinit(gpa);
@@ -187,9 +189,12 @@ fn stopRows(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, line
     for ([_]struct { []const u8, gen.Pair }{ .{ "W2 10%", w2 }, .{ "W3b", w3b } }) |case| {
         const plain = try timeLines(r, d, config, case[1], .{});
         const watched = try timeLines(r, d, config, case[1], .{ .stop = &flag });
+        const cancelable = try timeLines(r, d, config, case[1], .{ .io = r.io });
         try r.line(case[0], "myers", "no flag", plain / 1e6, "ms");
         try r.line(case[0], "myers", "stop flag", watched / 1e6, "ms");
         try r.line(case[0], "myers", "flag cost", (watched - plain) / plain * 100, "%");
+        try r.line(case[0], "myers", "io", cancelable / 1e6, "ms");
+        try r.line(case[0], "myers", "io cost", (cancelable - plain) / plain * 100, "%");
     }
 }
 
