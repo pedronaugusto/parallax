@@ -8,10 +8,15 @@ const shakedown = @import("shakedown");
 const parallax = @import("../parallax.zig");
 const reactor = @import("reactor");
 
+/// Whether reactor, the evented `Io`, builds for this target: it and shuttle
+/// under it build for 64-bit targets only. Elsewhere the threaded backend
+/// alone runs.
+const evented_builds = @import("builtin").target.ptrBitWidth() == 64;
+
 /// The cancellation checks a call makes, and an event set at the first:
 /// the call is under way.
 const Checks = struct {
-    count: std.atomic.Value(u64) = .init(0),
+    count: std.atomic.Value(usize) = .init(0),
     started: std.Io.Event = .unset,
 
     fn checkCancel(userdata: ?*anyopaque) std.Io.Cancelable!void {
@@ -119,6 +124,7 @@ fn evented(runtime: *reactor.Runtime) !?std.Io {
 }
 
 test "a diff or merge canceled while it runs ends with Canceled, on the evented backend" {
+    if (comptime !evented_builds) return error.SkipZigTest;
     var runtime: reactor.Runtime = undefined;
     const io = try evented(&runtime) orelse return error.SkipZigTest;
     defer runtime.deinit();
@@ -127,6 +133,7 @@ test "a diff or merge canceled while it runs ends with Canceled, on the evented 
 
 test "a diff or merge given an Io and never canceled gives the same script and work" {
     try unchanged(std.testing.io);
+    if (comptime !evented_builds) return;
     var runtime: reactor.Runtime = undefined;
     const io = try evented(&runtime) orelse return;
     defer runtime.deinit();
