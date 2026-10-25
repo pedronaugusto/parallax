@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Development: the cancellation tests build for 32-bit targets (x86-linux-musl): their evented half, on reactor, runs only where reactor builds (64-bit), and the check counter is a `usize`.
+
 ## [0.3.0] - 2026-10-24
 
 ### Added
