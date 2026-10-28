@@ -5,6 +5,7 @@
 //! [-R] FILE PATCH` the file with the patch applied (exit 1 when a hunk is
 //! rejected). Output goes to stdout.
 const std = @import("std");
+const aegis = @import("aegis");
 const parallax = @import("parallax");
 
 pub fn main(init: std.process.Init) !u8 {
@@ -38,7 +39,7 @@ pub fn main(init: std.process.Init) !u8 {
             i += 1;
             const n = try std.fmt.parseInt(u8, args[i], 10);
             if (a[1] == 'U') context = n else apply.fuzz = n;
-        } else try files.append(arena, try std.Io.Dir.cwd().readFileAlloc(io, a, arena, .unlimited));
+        } else try files.append(arena, try aegis.own.readFile(io, std.Io.Dir.cwd(), a, arena, .literal("1GiB")));
     }
     var buffer: [1 << 16]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &buffer);

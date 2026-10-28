@@ -28,6 +28,7 @@
 //!
 //! Timings are wall-clock on this machine; CI only compiles this file.
 const std = @import("std");
+const aegis = @import("aegis");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const parallax = @import("parallax");
@@ -626,7 +627,7 @@ const Records = struct {
 fn checkCorpus(gpa: Allocator, io: Io, dir: []const u8) !void {
     var path_buffer: [4096]u8 = undefined;
     const path = try std.mem.print(&path_buffer, "{s}/manifest", .{dir});
-    const manifest = try Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
+    const manifest = try aegis.own.readFile(io, Io.Dir.cwd(), path, gpa, .literal("1MiB"));
     defer gpa.free(manifest);
     if (!std.mem.eql(u8, manifest, @embedFile("linux-v6.11-v6.12.manifest"))) return error.CorpusMismatch;
 }

@@ -16,6 +16,7 @@
 //! git runs with no system or global configuration.
 
 const std = @import("std");
+const aegis = @import("aegis");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
@@ -294,7 +295,7 @@ fn collect(init: std.process.Init, args: []const []const u8) !void {
         try Io.Dir.cwd().writeFile(io, .{ .sub_path = committed, .data = manifest });
         return;
     }
-    const expected = try Io.Dir.cwd().readFileAlloc(io, committed, arena, .unlimited);
+    const expected = try aegis.own.readFile(io, Io.Dir.cwd(), committed, arena, .literal("1MiB"));
     if (!std.mem.eql(u8, expected, manifest)) {
         say(io, "the corpus differs from {s}:\n{s}", .{ committed, manifest });
         return error.ManifestMismatch;
@@ -345,11 +346,11 @@ fn smoke(init: std.process.Init) !void {
     try command(git, &.{ "-c", "commit.gpgsign=false", "commit", "-m", "merge" });
     try collect(init, &.{ "bench-corpus", "--repo", "repo", "--out", "out", "--range", "base..HEAD" });
     const arena = init.arena.allocator();
-    const pairs = try cwd.readFileAlloc(io, "out/pairs", arena, .unlimited);
-    const triples = try cwd.readFileAlloc(io, "out/merges", arena, .unlimited);
+    const pairs = try aegis.own.readFile(io, cwd, "out/pairs", arena, .literal("1MiB"));
+    const triples = try aegis.own.readFile(io, cwd, "out/merges", arena, .literal("1MiB"));
     // The records include their little-endian field lengths.
     if (pairs.len != 32 or triples.len != 24) return error.SmokeFailed;
-    const manifest = try cwd.readFileAlloc(io, "out/manifest", arena, .unlimited);
+    const manifest = try aegis.own.readFile(io, cwd, "out/manifest", arena, .literal("1MiB"));
     if (std.mem.find(u8, manifest, "pairs: 2\n") == null or std.mem.find(u8, manifest, "triples: 1\n") == null) return error.SmokeFailed;
 }
 

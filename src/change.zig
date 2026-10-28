@@ -11,7 +11,6 @@ pub const Algorithm = enum { myers, patience, histogram };
 /// One run that differs: `old_len` lines from `old_start` replaced by
 /// `new_len` lines from `new_start`. Runs ascend strictly on both sides and
 /// never touch.
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; script ranges are produced from bounded line/sequence flags and stay compact in script iteration.
 pub const Change = struct {
     old_start: u32,
     old_len: u32,

@@ -107,7 +107,7 @@ pub fn dev(b: *std.Build, tools: type) void {
             .root_source_file = p.path("bench/cli.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "parallax", .module = module }},
+            .imports = &.{ .{ .name = "parallax", .module = module }, .{ .name = "aegis", .module = aegis } },
         }),
     });
     check.dependOn(&cli.step);
@@ -116,7 +116,7 @@ pub fn dev(b: *std.Build, tools: type) void {
     // names, written outside this repository.
     const corpus = b.addExecutable(.{
         .name = "bench-corpus",
-        .root_module = b.createModule(.{ .root_source_file = p.path("bench/corpus.zig"), .target = target, .optimize = .safe }),
+        .root_module = b.createModule(.{ .root_source_file = p.path("bench/corpus.zig"), .target = target, .optimize = .safe, .imports = &.{.{ .name = "aegis", .module = aegis }} }),
     });
     check.dependOn(&corpus.step);
     const corpus_run = b.addRunArtifact(corpus);
@@ -162,8 +162,10 @@ pub fn dev(b: *std.Build, tools: type) void {
 /// `b` is the development build.
 fn benchImports(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) []const std.Build.Module.Import {
     // The benchmark harness is shakedown's.
+    const p = b.dependency("parallax", .{ .target = target, .optimize = optimize }).builder;
     return b.allocator.dupe(std.Build.Module.Import, &.{
         .{ .name = "parallax", .module = computationModule(b, target, optimize) },
+        .{ .name = "aegis", .module = p.dependency("aegis", .{ .target = target, .optimize = optimize }).module("aegis") },
     }) catch @panic("out of memory");
 }
 

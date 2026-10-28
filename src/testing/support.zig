@@ -560,12 +560,12 @@ pub fn markersOne(_: void, case: *shakedown.Case) !void {
     var it = parallax.merge.parseMarkers(marked, .{ .marker_size = if (gen.weighted(s, &.{ 3, 1 }) == 1) 3 else 7 });
     var at: usize = 0;
     while (true) {
-        const part = it.next() catch |err| switch (err) {
+        const part = (it.next() catch |err| switch (err) {
             error.UnterminatedConflict, error.MisplacedMarker, error.TooDeep => {
                 try std.testing.expect(it.line != 0);
                 return;
             },
-        } orelse break;
+        }) orelse break;
         const bytes = switch (part) {
             .text => |t| t,
             .conflict => |c| blk: {

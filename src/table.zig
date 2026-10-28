@@ -24,7 +24,6 @@ pub const Texts = struct {
     }
 };
 
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; splitAll bounds total lines before the packed one-domain class table is built.
 pub const Table = struct {
     /// Private: the slots, a power of two of them. A taken slot holds the
     /// high half of a line's hash (which also picks its slot) above its id
@@ -84,7 +83,7 @@ pub const Table = struct {
                 @prefetch(&t.slots.items[tagOf(h.*) & mask], .{ .rw = .write });
             }
             for (hashes[0..n], at.., 0..) |h, i, k| {
-                const repeat = repeats >> @intCast(k) & 1 != 0;
+                const repeat = (repeats >> @intCast(k)) & 1 != 0;
                 out[i - from] = if (repeat) out[i - from - 1] else t.internHashed(texts, @intCast(offset + i), lines.get(@intCast(i)), h, compare);
             }
             at += n;
@@ -108,7 +107,7 @@ pub const Table = struct {
             const slot = slots[at];
             if (slot == 0) {
                 const id = t.classes;
-                slots[at] = @as(u64, tag) << 32 | (id + 1);
+                slots[at] = (@as(u64, tag) << 32) | (id + 1);
                 t.first.appendAssumeCapacity(global);
                 t.classes += 1;
                 return id;

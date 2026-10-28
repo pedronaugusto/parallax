@@ -75,7 +75,6 @@ pub const Context = struct {
     minimal: bool,
     /// Work units before the search describes what is left coarsely; 0 is
     /// no cap.
-    // aegis: measured-boundary: docs/design.md#numeric-boundaries; core unwraps a Work cap once; the loop counts only sweeps.
     max_work: u64,
     /// Work units spent, over every search the diff makes.
     work: u64 = 0,
@@ -257,7 +256,7 @@ fn markDiscardable(dis: []const u8, runs: []u16) void {
     var twos: u16 = 0;
     var run_start: usize = 0;
     for (0..n) |k| {
-        runs[k] = zeros | twos << 7;
+        runs[k] = zeros | (twos << 7);
         switch (dis[k]) {
             1 => {
                 zeros = 0;

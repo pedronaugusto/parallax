@@ -6,7 +6,6 @@
 //! a reader expects.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 /// Change flags shared by the algorithm entry points.
 pub const Flags = @import("flags.zig").Flags;

@@ -28,8 +28,8 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
         slots: std.ArrayList(Slot) = .empty,
 
         const Self = @This();
-        // aegis: measured-boundary: docs/design.md#numeric-boundaries; the one-domain probe loop stores class+1, reserving zero for an empty slot.
-        const Slot = struct { hash: u64, id: u32 };
+        /// An item's hash and class, or an empty slot (no class).
+        const Slot = struct { hash: u64 = 0, class: ?ClassId = null };
 
         pub fn init(gpa: Allocator, context: Context) Self {
             return .{ .gpa = gpa, .context = context };
@@ -46,7 +46,7 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
         pub fn clear(s: *Self) void {
             s.items.clearRetainingCapacity();
             s.slots.shrinkRetainingCapacity(@min(s.slots.items.len, 64));
-            @memset(s.slots.items, .{ .hash = 0, .id = 0 });
+            @memset(s.slots.items, .{});
         }
 
         /// How many distinct items: every id is below this.
@@ -69,13 +69,14 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
             var at: usize = @intCast(h & mask);
             while (true) : (at = (at + 1) & mask) {
                 const slot = &s.slots.items[at];
-                if (slot.id == 0) {
+                const known = slot.class orelse {
                     if (s.items.items.len == std.math.maxInt(u32)) return error.TooManyClasses;
+                    const class: ClassId = .fromRaw(@intCast(s.items.items.len));
                     try s.items.append(s.gpa, item);
-                    slot.* = .{ .hash = h, .id = @intCast(s.items.items.len) };
-                    return .fromRaw(slot.id - 1);
-                }
-                if (slot.hash == h and s.context.eql(s.items.items[slot.id - 1], item)) return .fromRaw(slot.id - 1);
+                    slot.* = .{ .hash = h, .class = class };
+                    return class;
+                };
+                if (slot.hash == h and s.context.eql(s.items.items[known.raw()], item)) return known;
             }
         }
 
@@ -85,19 +86,18 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
             for (items, out) |item, *id| id.* = try s.intern(item);
         }
 
-        // aegis: design: docs/design.md#numeric-boundaries; the live slot extent and half-full invariant bound the double-size table plus scratch before allocation.
         fn grow(s: *Self) Allocator.Error!void {
             const old_len = s.slots.items.len;
             const new_len = @max(64, old_len * 2);
             // The new table after the live slots, then the live ones moved in.
             try s.slots.resize(s.gpa, old_len + new_len);
             const table = s.slots.items[old_len..][0..new_len];
-            @memset(table, .{ .hash = 0, .id = 0 });
+            @memset(table, .{});
             const mask = new_len - 1;
             for (s.slots.items[0..old_len]) |slot| {
-                if (slot.id == 0) continue;
+                if (slot.class == null) continue;
                 var at: usize = @intCast(slot.hash & mask);
-                while (table[at].id != 0) at = (at + 1) & mask;
+                while (table[at].class != null) at = (at + 1) & mask;
                 table[at] = slot;
             }
             @memmove(s.slots.items[0..new_len], table);

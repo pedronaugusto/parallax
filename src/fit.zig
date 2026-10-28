@@ -30,12 +30,11 @@ test "a list grows to exactly what is asked and keeps it" {
 /// Bytes occupied by one retained array. The allocator has already checked
 /// its extent before publishing the capacity.
 pub fn bytes(list: anytype) Bytes {
-    // aegis: design: docs/design.md#numeric-boundaries; a live array's allocated extent proves this multiplication fits, and the output is only bytes.
     return .fromRaw(list.capacity * @sizeOf(@TypeOf(list.items[0])));
 }
 
 /// Sum of disjoint live storage, already bounded by the address space.
 pub fn add(a: Bytes, b: Bytes) Bytes {
-    // glint-ignore: A004 -- design: docs/design.md#numeric-boundaries; disjoint live allocations cannot exceed the address space; both operands are byte counts.
+    // aegis: design: docs/design.md#numeric-boundaries; disjoint live allocations cannot exceed the address space; both operands are byte counts.
     return .fromRaw(a.raw() + b.raw());
 }

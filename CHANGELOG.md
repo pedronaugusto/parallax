@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- On aegis 0.2.3 (the aegis 0.2 line), developed with preflight 0.18.4. The interner's slot holds an optional class where it held the class plus one, zero for empty.
 - Development: the cancellation tests build for 32-bit targets (x86-linux-musl): their evented half, on reactor, runs only where reactor builds (64-bit), and the check counter is a `usize`.
 
 ## [0.3.0] - 2026-10-24

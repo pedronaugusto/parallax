@@ -33,7 +33,6 @@ table: table_mod.Table = .{},
 /// Private: line ends of up to three inputs.
 ends: [3]std.ArrayList(u32) = .{ .empty, .empty, .empty },
 /// Private: the ids of every line of the inputs, side after side.
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; line/table input bounds establish this compact one-domain class array.
 ids: std.ArrayList(u32) = .empty,
 /// Private: scripts; a merge keeps two.
 changes: std.ArrayList(Change) = .empty,
@@ -251,6 +250,7 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
         .io = options.io,
     }, &d.changes);
     var r = result;
+    // aegis: design: a result borrows the workspace until the next call on `d`, as the file's contract says
     r.changes = d.changes.items;
     return r;
 }
@@ -297,6 +297,7 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
     // The sides git takes whole: both the same, or one side with no change.
     if (std.mem.eql(u8, ours, theirs)) {
         try d.whole(if (std.mem.eql(u8, base, ours)) .unchanged else .same, lens);
+        // aegis: design: a result borrows the workspace until the next call on `d`, as the file's contract says
         result.regions = regions.items;
         return result;
     }
@@ -318,12 +319,14 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
     if (!std.mem.eql(u8, base, ours)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, ids_b, ids_o, run, &d.changes);
     if (d.changes.items.len == 0) {
         try d.whole(.theirs, lens);
+        // aegis: design: a result borrows the workspace until the next call on `d`, as the file's contract says
         result.regions = regions.items;
         return result;
     }
     if (!std.mem.eql(u8, base, theirs)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, ids_b, ids_t, run, &d.changes_theirs);
     if (d.changes_theirs.items.len == 0) {
         try d.whole(.ours, lens);
+        // aegis: design: a result borrows the workspace until the next call on `d`, as the file's contract says
         result.regions = regions.items;
         return result;
     }
@@ -343,6 +346,7 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
         .stop = options.stop,
         .io = options.io,
     }, d.changes.items, d.changes_theirs.items);
+    // aegis: design: a result borrows the workspace until the next call on `d`, as the file's contract says
     result.regions = regions.items;
     return result;
 }
@@ -436,9 +440,10 @@ pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.Refine
     });
 }
 
-/// aegis: measured-boundary: docs/design.md#numeric-boundaries; class IDs
-/// have the scalar layout checked by their owner. Callers establish shared
-/// membership; runtime-safety builds also check it before kernel entry.
+/// The ids as the kernels compare them (docs/design.md#numeric-boundaries).
+/// Callers establish shared membership; runtime-safety builds also check it
+/// before kernel entry.
 fn rawIds(ids: []const class.ClassId) []const u32 {
-    return @ptrCast(ids); // safe: ClassId has u32 size/alignment and every bit pattern is a valid raw class representation
+    // aegis: hot-loop: the kernels compare raw u32 class ids; ClassId is an enum(u32), the same size and alignment, every bit pattern a valid id
+    return @ptrCast(ids);
 }

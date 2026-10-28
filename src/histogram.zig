@@ -20,7 +20,6 @@ const fit = @import("fit.zig");
 /// Lines occurring more often than this in a region anchor nothing.
 const max_chain: u32 = 64;
 
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; bounded class/line arrays retain the validated occurrence-chain kernel representation.
 pub const Buffers = struct {
     next: std.ArrayList(u32) = .empty,
     /// Per id: the first line it is on in the region's old side, and how

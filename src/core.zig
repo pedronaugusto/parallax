@@ -67,7 +67,6 @@ pub fn diff(
         .gpa = gpa,
         .classes = run.classes,
         .minimal = run.minimal,
-        // aegis: measured-boundary: docs/design.md#numeric-boundaries; validated sweep cap enters the raw one-unit search kernel.
         .max_work = run.max_work.raw(),
         .stop = run.stop,
         .io = run.io,

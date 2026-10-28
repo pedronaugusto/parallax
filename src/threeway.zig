@@ -101,6 +101,7 @@ pub const Merge = struct {
 
 /// One region in xdiff's terms, signed as xdiff's are.
 const Hunk = struct {
+    // aegis: design: a hunk's kind in xdiff's terms, merged as xdiff merges two (a kind that differs is a conflict), not a lifecycle
     mode: Mode,
     at0: i64,
     len0: i64,
