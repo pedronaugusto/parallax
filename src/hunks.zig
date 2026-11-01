@@ -8,39 +8,29 @@ const Change = @import("change.zig").Change;
 const Lines = @import("lines.zig").Lines;
 const compare = @import("compare.zig");
 
-/// A caller's test of one line, given with its newline.
-pub const LinePredicate = struct {
-    context: ?*const anyopaque = null,
-    at: *const fn (context: ?*const anyopaque, line: []const u8) bool,
-};
+/// git's default rule for which lines start a function, and GNU diff -p's:
+/// a line, given without its newline, whose first byte is a letter, '_' or
+/// '$' starts one and shows whole.
+pub fn cFunction(line: []const u8) ?[]const u8 {
+    if (line.len == 0) return null;
+    const first = line[0];
+    if (std.ascii.isAlphabetic(first) or first == '_' or first == '$') return line;
+    return null;
+}
 
-/// Which lines start a function, and what a hunk shows of one: the text
-/// after a hunk's second `@@`, and the bounds `HunkOptions.function_context`
-/// widens a hunk to.
-pub const Heading = struct {
-    context: ?*const anyopaque = null,
-    /// Given an old-side line without its newline: the text to show, or
-    /// null when the line starts nothing.
-    find: *const fn (context: ?*const anyopaque, line: []const u8) ?[]const u8,
-    /// Longer text is cut here, then its trailing whitespace dropped.
-    max_len: u32 = 80,
+/// The text after a hunk's `@@` that starts `line`, given without its
+/// newline, or null when it starts no function: by `context.heading` where
+/// the context has one, else by git's default rule.
+pub fn headingOf(context: anytype, line: []const u8) ?[]const u8 {
+    if (comptime std.meta.hasMethod(@TypeOf(context), "heading")) return context.heading(line);
+    return cFunction(line);
+}
 
-    /// First byte a letter, '_' or '$': git's default rule and GNU diff -p.
-    pub const c_function: Heading = .{ .find = cFunction };
-
-    fn cFunction(_: ?*const anyopaque, line: []const u8) ?[]const u8 {
-        if (line.len == 0) return null;
-        const first = line[0];
-        if (std.ascii.isAlphabetic(first) or first == '_' or first == '$') return line;
-        return null;
-    }
-
-    /// Whether `line`, newline and all, starts a function.
-    fn starts(h: Heading, line: []const u8) bool {
-        const bare = if (line.len != 0 and line[line.len - 1] == '\n') line[0 .. line.len - 1] else line;
-        return h.find(h.context, bare) != null;
-    }
-};
+/// Whether `line`, newline and all, starts a function.
+fn starts(context: anytype, line: []const u8) bool {
+    const bare = if (line.len != 0 and line[line.len - 1] == '\n') line[0 .. line.len - 1] else line;
+    return headingOf(context, bare) != null;
+}
 
 pub const HunkOptions = struct {
     /// Lines of context on each side of a change.
@@ -48,17 +38,17 @@ pub const HunkOptions = struct {
     /// Further unchanged lines two changes may have between them and still
     /// share a hunk: git --inter-hunk-context.
     inter_hunk_context: u32 = 0,
-    /// Changes made only of blank lines (or of lines `ignore` accepts) start
-    /// no hunk: git --ignore-blank-lines and -I. They still print inside a
-    /// hunk another change opens.
+    /// Changes made only of blank lines start no hunk: git
+    /// --ignore-blank-lines. Nor do changes made only of lines the
+    /// context's `ignore` accepts, where it has one: git -I. They still
+    /// print inside a hunk another change opens.
     ignore_blank_lines: bool = false,
-    ignore: ?LinePredicate = null,
-    /// Widen each hunk to the whole function around its changes, functions
-    /// starting where this finds a heading: git -W. A function runs from
-    /// its heading line, and the lines above it up to a blank line or
+    /// Widen each hunk to the whole function around its changes: git -W.
+    /// Functions start where `headingOf` finds a heading. A function runs
+    /// from its heading line, and the lines above it up to a blank line or
     /// another heading, to just before the next heading less the blank
     /// lines before it; changes in one function share a hunk.
-    function_context: ?Heading = null,
+    function_context: bool = false,
 };
 
 /// One hunk: the lines it shows on each side, and the changes inside.
@@ -80,10 +70,10 @@ pub const HunkIterator = struct {
     /// Private: the first change not yet in a hunk.
     at: usize = 0,
 
-    fn ignorable(it: *const HunkIterator, i: usize) bool {
+    fn ignorable(it: *const HunkIterator, context: anytype, i: usize) bool {
         const c = it.changes[i];
         if (it.options.ignore_blank_lines and it.allBlank(c)) return true;
-        if (it.options.ignore) |p| return it.allMatch(c, p);
+        if (comptime std.meta.hasMethod(@TypeOf(context), "ignore")) return it.allIgnored(context, c);
         return false;
     }
 
@@ -93,9 +83,11 @@ pub const HunkIterator = struct {
         return true;
     }
 
-    fn allMatch(it: *const HunkIterator, c: Change, p: LinePredicate) bool {
-        for (c.old_start..c.old_start + c.old_len) |i| if (!p.at(p.context, it.old.get(@intCast(i)))) return false;
-        for (c.new_start..c.new_start + c.new_len) |i| if (!p.at(p.context, it.new.get(@intCast(i)))) return false;
+    /// Whether `context.ignore` accepts every line of `c`, each given with
+    /// its newline.
+    fn allIgnored(it: *const HunkIterator, context: anytype, c: Change) bool {
+        for (c.old_start..c.old_start + c.old_len) |i| if (!context.ignore(it.old.get(@intCast(i)))) return false;
+        for (c.new_start..c.new_start + c.new_len) |i| if (!context.ignore(it.new.get(@intCast(i)))) return false;
         return true;
     }
 
@@ -109,11 +101,11 @@ pub const HunkIterator = struct {
 
     /// git's `get_func_line`: the first old line from `start` towards
     /// `limit`, which it never reaches, that starts a function; -1 for none.
-    fn functionLine(it: *const HunkIterator, heading: Heading, start: i64, limit: i64) i64 {
+    fn functionLine(it: *const HunkIterator, context: anytype, start: i64, limit: i64) i64 {
         const step: i64 = if (start > limit) -1 else 1;
         var l = start;
         while (l != limit and 0 <= l and l < it.old.len()) : (l += step) {
-            if (heading.starts(it.old.get(@intCast(l)))) return l;
+            if (starts(context, it.old.get(@intCast(l)))) return l;
         }
         return -1;
     }
@@ -124,9 +116,12 @@ pub const HunkIterator = struct {
         return true;
     }
 
-    pub fn next(it: *HunkIterator) ?Hunk {
+    /// The next hunk, or null after the last. `context` is the caller's, as
+    /// `HunkOptions` names its methods, `.{}` for none; give the same one
+    /// to every call on `it`.
+    pub fn next(it: *HunkIterator, context: anytype) ?Hunk {
         const changes = it.changes;
-        const any_ignorable = it.options.ignore_blank_lines or it.options.ignore != null;
+        const any_ignorable = it.options.ignore_blank_lines or comptime std.meta.hasMethod(@TypeOf(context), "ignore");
         const ctx: i64 = it.options.context;
         const max_common: i64 = 2 * ctx + it.options.inter_hunk_context;
         const max_ignorable: i64 = ctx;
@@ -135,7 +130,7 @@ pub const HunkIterator = struct {
         var first = it.at;
         if (any_ignorable) {
             var p = it.at;
-            while (p < changes.len and it.ignorable(p)) : (p += 1) {
+            while (p < changes.len and it.ignorable(context, p)) : (p += 1) {
                 const x = p + 1;
                 if (x == changes.len or changes[x].old_start - endOld(changes[p]) >= max_ignorable) first = x;
             }
@@ -155,7 +150,7 @@ pub const HunkIterator = struct {
         }) {
             const distance = changes[x].old_start - endOld(changes[p]);
             if (distance > max_common) break;
-            const ign = any_ignorable and it.ignorable(x);
+            const ign = any_ignorable and it.ignorable(context, x);
             if (distance < max_ignorable and (!ign or last == p)) {
                 last = x;
                 ignored = 0;
@@ -171,8 +166,8 @@ pub const HunkIterator = struct {
             }
         }
 
-        const from = it.hunkStart(first);
-        const to = it.hunkEnd(last);
+        const from = it.hunkStart(context, first);
+        const to = it.hunkEnd(context, last);
         first = from.change;
         last = to.change;
         it.at = last + 1;
@@ -192,7 +187,7 @@ pub const HunkIterator = struct {
     /// function's under `function_context` (git's xdl_emit_diff). An
     /// ignorable change the wider context reaches is shown after all, and
     /// becomes the first.
-    fn hunkStart(it: *const HunkIterator, first_change: usize) Bound {
+    fn hunkStart(it: *const HunkIterator, context: anytype, first_change: usize) Bound {
         const changes = it.changes;
         const ctx: i64 = it.options.context;
         const n_old: i64 = it.old.len();
@@ -203,7 +198,7 @@ pub const HunkIterator = struct {
             const f = changes[first];
             var s1: i64 = @max(@as(i64, f.old_start) - ctx, 0);
             var s2: i64 = @max(@as(i64, f.new_start) - ctx, 0);
-            const heading = it.options.function_context orelse return .{ .old = s1, .new = s2, .change = first };
+            if (!it.options.function_context) return .{ .old = s1, .new = s2, .change = first };
             var from: i64 = f.old_start;
             if (from >= n_old) {
                 // Lines added at the end: a whole new function needs no
@@ -211,12 +206,12 @@ pub const HunkIterator = struct {
                 // last function.
                 var at: i64 = f.new_start;
                 while (at < n_new) : (at += 1) {
-                    if (heading.starts(it.new.get(@intCast(at)))) return .{ .old = s1, .new = s2, .change = first };
+                    if (starts(context, it.new.get(@intCast(at)))) return .{ .old = s1, .new = s2, .change = first };
                 }
                 from = n_old - 1;
             }
-            var fs1 = it.functionLine(heading, from, -1);
-            while (fs1 > 0 and !emptyLine(it.old, fs1 - 1) and !heading.starts(it.old.get(@intCast(fs1 - 1)))) fs1 -= 1;
+            var fs1 = it.functionLine(context, from, -1);
+            while (fs1 > 0 and !emptyLine(it.old, fs1 - 1) and !starts(context, it.old.get(@intCast(fs1 - 1)))) fs1 -= 1;
             if (fs1 < 0) fs1 = 0;
             if (fs1 < s1) {
                 s2 = @max(s2 - (s1 - fs1), 0);
@@ -234,7 +229,7 @@ pub const HunkIterator = struct {
     /// The end of the hunk whose last change is `last`, widened to the
     /// function's under `function_context`; a change in the same function
     /// joins the hunk, and the end is found again from it.
-    fn hunkEnd(it: *const HunkIterator, last_change: usize) Bound {
+    fn hunkEnd(it: *const HunkIterator, context: anytype, last_change: usize) Bound {
         const changes = it.changes;
         const ctx: i64 = it.options.context;
         const n_old: i64 = it.old.len();
@@ -247,8 +242,8 @@ pub const HunkIterator = struct {
             lctx = @min(lctx, n_new - endNew(l));
             var e1 = endOld(l) + lctx;
             var e2 = endNew(l) + lctx;
-            const heading = it.options.function_context orelse return .{ .old = e1, .new = e2, .change = last };
-            var fe1 = it.functionLine(heading, endOld(l), n_old);
+            if (!it.options.function_context) return .{ .old = e1, .new = e2, .change = last };
+            var fe1 = it.functionLine(context, endOld(l), n_old);
             while (fe1 > 0 and emptyLine(it.old, fe1 - 1)) fe1 -= 1;
             if (fe1 < 0) fe1 = n_old;
             if (fe1 > e1) {
@@ -257,7 +252,7 @@ pub const HunkIterator = struct {
             }
             if (last + 1 < changes.len) {
                 const next_start = @min(@as(i64, changes[last + 1].old_start), n_old - 1);
-                if (next_start - ctx <= e1 or it.functionLine(heading, next_start, e1) < 0) {
+                if (next_start - ctx <= e1 or it.functionLine(context, next_start, e1) < 0) {
                     last += 1;
                     continue;
                 }

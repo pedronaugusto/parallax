@@ -38,7 +38,7 @@ std.debug.assert(diff.stat().added == 2);
 // The unified body, as `git diff` prints it.
 var out: std.Io.Writer.Allocating = .init(gpa);
 defer out.deinit();
-try parallax.writeUnified(&out.writer, diff, .{ .heading = .c_function });
+try parallax.writeUnified(&out.writer, diff, .{ .function_names = true }, .{});
 std.debug.assert(std.mem.eql(u8, out.written(), "@@ -1,3 +1,4 @@\n a\n-b\n+B\n c\n+d\n"));
 ```
 <!-- END GENERATED -->
@@ -89,7 +89,7 @@ var a: [3]parallax.ClassId = undefined;
 var b: [3]parallax.ClassId = undefined;
 try interner.internSlice(&.{ "red", "green", "blue" }, &a);
 try interner.internSlice(&.{ "red", "yellow", "blue" }, &b);
-const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() });
+const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() }, .{});
 std.debug.assert(changes.len == 1);
 std.debug.assert(changes[0].old_start == 1);
 ```
@@ -175,22 +175,29 @@ whitespace and the two can match.
 
 ### Hunks and the unified body
 
-`HunkOptions` has git's `-U`, `--inter-hunk-context`, `--ignore-blank-lines`,
-`-I` (a caller's predicate on each line, given with its newline) and `-W`:
-`function_context` widens each hunk to the whole function around its changes,
-from the line a `Heading` finds, with the comment lines above it, to the next
+`HunkOptions` has git's `-U`, `--inter-hunk-context`, `--ignore-blank-lines`
+and `-W`: `function_context` widens each hunk to the whole function around its
+changes, from its function line, with the comment lines above it, to the next
 one, and changes in one function share a hunk, as git's do (git's hunks then
 sometimes overlap, and so do these). `writeUnified` writes the `@@` lines, the
-heading a `Heading` finds (`Heading.c_function` is git's default rule), context
-taken from the new side as git prints it, and `\ No newline at end of file`.
-A `Paint` in its options is handed each line, what it is and its sign, and
-writes it instead: how a caller colours the diff, as git's `--color` does.
+function line under `function_names`, context taken from the new side as git
+prints it, and `\ No newline at end of file`.
+
+The caller's rules come as a context, `.{}` for none, as std's sort takes its
+`lessThan`: each method it has is called, inlined. `heading` says which lines
+start a function and what a hunk shows of one (without it, `cFunction`, git's
+default rule); `ignore` is git's `-I`, a test of each line given with its
+newline; `paint` is handed each line, what it is, its sign and its number, and
+writes it instead of `writeLine`: how a caller colours the diff, as git's
+`--color` does. Its errors pass through `writeUnified`.
 
 ### Sequences and refinement
 
 `Interner(T, Context)` gives any type dense ids, with `Context` as std's hash maps
 take it, and `Differ.sequences` diffs two id sequences with every algorithm, the
-work cap, and the caller's anchors and indentation when it has them.
+work cap, and the anchors and indentation of the caller's context when it has
+them (`anchor`, `indentOld` and `indentNew`); `Differ.mergeSequences` reads the
+context's `content`, as git's line merge reads letters and digits.
 
 `Differ.refine` takes one change of a line diff and cuts its old lines and its
 new lines into tokens: `words` (runs of letters, digits, `_` and bytes from
@@ -270,15 +277,16 @@ marker alone on its line, which `write` writes for an empty label.
 |---|---|
 | `Differ.init(gpa)`, `deinit`, `shrink(keep)` | The workspace; `shrink` releases its scratch when it holds more than `keep` bytes |
 | `differ.lines(old, new, options)` | The line diff of two texts, as a `Diff` borrowing the inputs and the workspace |
-| `differ.sequences(old, new, options)` | The diff of two sequences of ids below `options.classes` |
+| `differ.sequences(old, new, options, context)` | The diff of two sequences of ids below `options.classes` |
 | `differ.merge(base, ours, theirs, options)` | The three-way merge, as regions |
-| `differ.mergeSequences(base, ours, theirs, options)` | The three-way merge of id sequences below `options.classes` |
+| `differ.mergeSequences(base, ours, theirs, options, context)` | The three-way merge of id sequences below `options.classes` |
 | `differ.refine(diff, change, options)` | The changed and unchanged spans inside one change |
 | `Interner(T, Context)` | Dense ids for any type: `intern`, `internSlice`, `classes`, `get`, `clear` |
 | `diffLines(gpa, old, new, options)` | A one-shot diff that owns its memory |
 | `diff.stat()`, `diff.ratio()` | Lines added and removed; the matched share of both sides |
-| `diff.ops()`, `diff.hunks(options)` | The script as steps, and as hunks; neither allocates |
-| `writeUnified(w, diff, options)` | The unified body, optionally with `---`/`+++` lines, each line through a `Paint` where one is given |
+| `diff.ops()`, `diff.hunks(options)` | The script as steps, and as hunks (`next(context)`); neither allocates |
+| `writeUnified(w, diff, options, context)` | The unified body, optionally with `---`/`+++` lines, each line through the context's `paint` where it has one |
+| `writeLine(w, line)` | One line of the body, plain, as a painter writes the lines it leaves uncoloured |
 | `merge.write(w, merge, options)` | The merged text with labels, marker size and resolution |
 | `merge.mergeAlloc(gpa, base, ours, theirs, options, write_options)` | Merge and write in one call |
 | `merge.parseMarkers(text, options)` | The text and conflicts of marked text, one part at a time |

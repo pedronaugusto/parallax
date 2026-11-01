@@ -48,26 +48,26 @@ pub const Bytes = Differ.Bytes;
 pub const Options = Differ.Options;
 /// How a diff of two id sequences is taken.
 pub const SequenceOptions = Differ.SequenceOptions;
-/// A caller's test of one position of the old sequence.
-pub const Predicate = Differ.Predicate;
-/// A caller's indentation per token.
-pub const Indent = Differ.Indent;
 /// How changes group into hunks.
 pub const HunkOptions = hunks.HunkOptions;
-/// A caller's test of one line, given with its newline.
-pub const LinePredicate = hunks.LinePredicate;
 /// One hunk and the changes inside it.
 pub const Hunk = hunks.Hunk;
 /// Hunks over a diff, allocating nothing.
 pub const HunkIterator = hunks.HunkIterator;
-/// The text after a hunk's second `@@`.
-pub const Heading = unified.Heading;
+/// git's default rule for which lines start a function.
+pub const cFunction = hunks.cFunction;
+/// The function line a caller's context, or git's default rule, finds.
+pub const headingOf = hunks.headingOf;
 /// How the unified writer writes.
 pub const UnifiedOptions = unified.UnifiedOptions;
-/// A caller that writes each line of a unified diff itself: colour.
-pub const Paint = unified.Paint;
+/// One line of a unified diff, what a caller's `paint` is handed.
+pub const UnifiedLine = unified.UnifiedLine;
+/// What `writeUnified` fails with for a context type.
+pub const WriteError = unified.WriteError;
 /// Write a diff as a unified diff body, as git prints it.
 pub const writeUnified = unified.writeUnified;
+/// Write one line of a unified diff plainly.
+pub const writeLine = unified.writeLine;
 /// An equivalence class, distinct from a sequence position.
 pub const ClassId = interner.ClassId;
 /// The number of classes in an interning domain.

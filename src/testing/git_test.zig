@@ -15,15 +15,49 @@ const merge_corpus = @embedFile("merge.corpus");
 const function_corpus = @embedFile("function.corpus");
 const markers_corpus = @embedFile("markers.corpus");
 
-fn startsWithPredicate(context: ?*const anyopaque, line: []const u8) bool {
-    const prefix: *const []const u8 = @ptrCast(@alignCast(context.?));
-    return std.mem.startsWith(u8, line, prefix.*);
+/// git -I^<prefix> as a context's `ignore`; no prefix ignores nothing.
+fn startsWith(prefix: []const u8, line: []const u8) bool {
+    return prefix.len != 0 and std.mem.startsWith(u8, line, prefix);
 }
+
+/// The unified writer's context for git's -I.
+const Ignoring = struct {
+    prefix: []const u8,
+    pub fn ignore(c: Ignoring, line: []const u8) bool {
+        return startsWith(c.prefix, line);
+    }
+};
+
+/// A painter that writes every line as the plain writer does, for git's
+/// -I as well.
+const Painting = struct {
+    prefix: []const u8,
+    pub fn ignore(c: Painting, line: []const u8) bool {
+        return startsWith(c.prefix, line);
+    }
+    pub fn paint(_: Painting, w: *std.Io.Writer, line: parallax.UnifiedLine) std.Io.Writer.Error!void {
+        switch (line.kind) {
+            .old_file => try w.print("--- {s}\n", .{line.text}),
+            .new_file => try w.print("+++ {s}\n", .{line.text}),
+            .hunk => {
+                try w.writeAll(line.text);
+                if (line.heading.len != 0) try w.print(" {s}", .{line.heading});
+                try w.writeByte('\n');
+            },
+            .incomplete => try w.writeAll(line.text),
+            .context, .old, .new => {
+                if (line.sign != 0) try w.writeByte(line.sign);
+                try w.writeAll(line.text);
+                if (!std.mem.endsWith(u8, line.text, "\n")) try w.writeByte('\n');
+            },
+        }
+    }
+};
 
 /// git's diff flags as parallax options.
 const DiffFlags = struct {
     options: parallax.Options = .{},
-    unified: parallax.UnifiedOptions = .{ .heading = .c_function },
+    unified: parallax.UnifiedOptions = .{ .function_names = true },
     anchors: [4][]const u8 = undefined,
     anchor_count: usize = 0,
     ignore_prefix: []const u8 = "",
@@ -55,7 +89,7 @@ const DiffFlags = struct {
             } else if (std.mem.eql(u8, flag, "--minimal")) {
                 f.options.minimal = true;
             } else if (std.mem.eql(u8, flag, "-W")) {
-                f.unified.hunks.function_context = .c_function;
+                f.unified.hunks.function_context = true;
             } else if (std.mem.eql(u8, flag, "--no-indent-heuristic")) {
                 f.options.indent_heuristic = false;
             } else if (std.mem.startsWith(u8, flag, "--anchored=")) {
@@ -73,7 +107,6 @@ const DiffFlags = struct {
     /// moving.
     fn bind(f: *DiffFlags) void {
         f.options.anchors = f.anchors[0..f.anchor_count];
-        if (f.ignore_prefix.len != 0) f.unified.hunks.ignore = .{ .context = @ptrCast(&f.ignore_prefix), .at = startsWithPredicate };
     }
 };
 
@@ -81,33 +114,12 @@ fn expectBody(d: *parallax.Differ, flags: *DiffFlags, old: []const u8, new: []co
     const diff = try d.lines(old, new, flags.options);
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try parallax.writeUnified(&out.writer, diff, flags.unified);
+    try parallax.writeUnified(&out.writer, diff, flags.unified, Ignoring{ .prefix = flags.ignore_prefix });
     try std.testing.expectEqualStrings(expected, out.written());
     // A painter that writes each line as it is given writes the same bytes.
     out.clearRetainingCapacity();
-    var painted = flags.unified;
-    painted.paint = .{ .write = writePlain };
-    try parallax.writeUnified(&out.writer, diff, painted);
+    try parallax.writeUnified(&out.writer, diff, flags.unified, Painting{ .prefix = flags.ignore_prefix });
     try std.testing.expectEqualStrings(expected, out.written());
-}
-
-/// A `Paint` that writes every line as the plain writer does.
-fn writePlain(_: ?*const anyopaque, w: *std.Io.Writer, line: parallax.Paint.Line) std.Io.Writer.Error!void {
-    switch (line.kind) {
-        .old_file => try w.print("--- {s}\n", .{line.text}),
-        .new_file => try w.print("+++ {s}\n", .{line.text}),
-        .hunk => {
-            try w.writeAll(line.text);
-            if (line.heading.len != 0) try w.print(" {s}", .{line.heading});
-            try w.writeByte('\n');
-        },
-        .incomplete => try w.writeAll(line.text),
-        .context, .old, .new => {
-            if (line.sign != 0) try w.writeByte(line.sign);
-            try w.writeAll(line.text);
-            if (!std.mem.endsWith(u8, line.text, "\n")) try w.writeByte('\n');
-        },
-    }
 }
 
 test "edit scripts land on the lines git's do, under every algorithm" {
@@ -157,7 +169,7 @@ test "a blank context line loses its space under suppress_blank_empty, as git di
     const diff = try d.lines("a\n\n \nb\n", "a\n\n \nc\n", .{});
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try parallax.writeUnified(&out.writer, diff, .{ .suppress_blank_empty = true });
+    try parallax.writeUnified(&out.writer, diff, .{ .suppress_blank_empty = true }, .{});
     // `git -c diff.suppressBlankEmpty=true diff --no-index`, 2.55: a line
     // of one space keeps its sign.
     try std.testing.expectEqualStrings("@@ -1,4 +1,4 @@\n a\n\n  \n-b\n+c\n", out.written());
@@ -264,11 +276,14 @@ test "merges are what git merge-file and merge-tree write, in every style, level
     try std.testing.expectEqual(@as(usize, 3015), count);
 }
 
-fn lineHasContent(context: ?*const anyopaque, i: u32) bool {
-    const lines: *const parallax.Lines = @ptrCast(@alignCast(context.?)); // safe: the test passes its Lines
-    for (lines.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true;
-    return false;
-}
+/// Our lines' content as git's line merge reads it: a letter or digit.
+const LineContent = struct {
+    ours: parallax.Lines,
+    pub fn content(l: LineContent, i: u32) bool {
+        for (l.ours.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true;
+        return false;
+    }
+};
 
 test "a merge of interned lines is git's line merge, region for region" {
     const gpa = std.testing.allocator;
@@ -301,8 +316,7 @@ test "a merge of interned lines is git's line merge, region for region" {
             .classes = interner.classes(),
             .style = flags.options.style,
             .level = flags.options.level,
-            .content = .{ .context = @ptrCast(&lines.ours), .at = lineHasContent }, // safe: lineHasContent reads it back as Lines
-        });
+        }, LineContent{ .ours = lines.ours });
         try std.testing.expectEqual(lines.conflicts, m.conflicts);
         try std.testing.expectEqualSlices(parallax.merge.Region, lines.regions, m.regions);
         // Written with the texts, it is git's output.

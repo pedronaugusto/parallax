@@ -62,9 +62,9 @@ test "a warm Differ allocates nothing, for any algorithm or a merge" {
     defer for (ids) |side| gpa.free(side);
     for ([_]parallax.merge.Style{ .merge, .diff3, .zdiff3 }) |style| {
         const options: parallax.merge.SequenceOptions = .{ .algorithm = .histogram, .style = style, .classes = .fromRaw(classes) };
-        _ = try d.mergeSequences(ids[0], ids[1], ids[2], options);
+        _ = try d.mergeSequences(ids[0], ids[1], ids[2], options, .{});
         const warm = counts(&counting);
-        _ = try d.mergeSequences(ids[0], ids[1], ids[2], options);
+        _ = try d.mergeSequences(ids[0], ids[1], ids[2], options, .{});
         try std.testing.expectEqual(warm, counts(&counting));
     }
 }
@@ -202,8 +202,8 @@ fn refineAll(gpa: std.mem.Allocator, old: []const u8, new: []const u8) !void {
 fn mergeIds(gpa: std.mem.Allocator, base: []const parallax.ClassId, ours: []const parallax.ClassId, theirs: []const parallax.ClassId, classes: u32) !void {
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
-    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = .fromRaw(classes), .style = .zdiff3 });
-    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = .fromRaw(classes), .algorithm = .histogram });
+    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = .fromRaw(classes), .style = .zdiff3 }, .{});
+    _ = try d.mergeSequences(base, ours, theirs, .{ .classes = .fromRaw(classes), .algorithm = .histogram }, .{});
 }
 
 fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: []const u8) !void {
@@ -255,13 +255,15 @@ test "a stop flag raised before a diff leaves no work and a script that applies"
     try std.testing.expectEqual(m.ours.len(), at);
 }
 
-/// Raises the flag it is given the first time patience asks about an
-/// anchor: a caller stopping the diff while it runs.
-fn raiseOnFirstAnchor(context: ?*const anyopaque, _: u32) bool {
-    const flag: *std.atomic.Value(bool) = @ptrCast(@alignCast(@constCast(context.?))); // safe: the test passes its flag
-    flag.store(true, .monotonic);
-    return false;
-}
+/// Raises its flag the first time patience asks about an anchor: a caller
+/// stopping the diff while it runs.
+const RaiseOnFirstAnchor = struct {
+    flag: *std.atomic.Value(bool),
+    pub fn anchor(r: RaiseOnFirstAnchor, _: u32) bool {
+        r.flag.store(true, .monotonic);
+        return false;
+    }
+};
 
 test "a stop flag raised while a diff runs ends it early with a script that applies" {
     const gpa = std.testing.allocator;
@@ -276,15 +278,14 @@ test "a stop flag raised while a diff runs ends it early with a script that appl
     defer gpa.free(old);
     const new = try lineIds(gpa, pair.new, &classes);
     defer gpa.free(new);
-    const whole = try gpa.dupe(parallax.Change, try d.sequences(old, new, .{ .classes = .fromRaw(classes), .algorithm = .patience }));
+    const whole = try gpa.dupe(parallax.Change, try d.sequences(old, new, .{ .classes = .fromRaw(classes), .algorithm = .patience }, .{}));
     defer gpa.free(whole);
     var flag: std.atomic.Value(bool) = .init(false);
     const stopped = try d.sequences(old, new, .{
         .classes = .fromRaw(classes),
         .algorithm = .patience,
-        .anchor = .{ .context = @ptrCast(&flag), .at = raiseOnFirstAnchor }, // safe: raiseOnFirstAnchor reads it back as the flag
         .stop = &flag,
-    });
+    }, RaiseOnFirstAnchor{ .flag = &flag });
     try std.testing.expect(flag.load(.monotonic));
     // Coarser: fewer, larger changes, still a script from old to new.
     try std.testing.expect(stopped.len < whole.len);

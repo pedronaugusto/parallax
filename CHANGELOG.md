@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** a caller's rules come as a context, as std's sort takes its `lessThan`, where they were a context pointer beside loose functions: each method the context has is called, inlined, and `.{}` is none. `writeUnified(w, diff, options, context)` asks its `heading`, `ignore` and `paint`, and a painter's errors pass through it (`WriteError(Context)`); `HunkIterator.next(context)` its `heading` and `ignore`; `Differ.sequences(…, options, context)` its `anchor`, `indentOld` and `indentNew`; `Differ.mergeSequences(…, options, context)` its `content`. `Heading`, `Paint`, `LinePredicate`, `Predicate` and `Indent` are gone, with `HunkOptions.ignore`, `UnifiedOptions.heading` and `.paint`, `SequenceOptions.anchor` and `.indent`, and `SequenceMerge` options' `content`. `UnifiedOptions.function_names` writes the function lines, `HunkOptions.function_context` is a flag, and either reads the context's `heading` or else `cFunction`, git's default rule (`Heading.c_function` before). `Paint.Line` is `UnifiedLine`; `writeLine` writes one line plainly, as a painter does the lines it leaves uncoloured. A function line is cut at git's 80 bytes (`Heading.max_len` before).
+
 - Development: the cancellation tests build for 32-bit targets (x86-linux-musl): their evented half, on reactor, runs only where reactor builds (64-bit), and the check counter is a `usize`.
 
 ## [0.3.0] - 2026-10-24

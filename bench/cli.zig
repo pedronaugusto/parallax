@@ -49,7 +49,7 @@ pub fn main(init: std.process.Init) !u8 {
     const command = args[1];
     if (std.mem.eql(u8, command, "diff") and files.items.len == 2) {
         const diff = try d.lines(files.items[0], files.items[1], options);
-        try parallax.writeUnified(w, diff, .{ .hunks = .{ .context = context }, .heading = .c_function, .files = .{ .old = args[args.len - 2], .new = args[args.len - 1] } });
+        try parallax.writeUnified(w, diff, .{ .hunks = .{ .context = context }, .function_names = true, .files = .{ .old = args[args.len - 2], .new = args[args.len - 1] } }, .{});
         status = @intFromBool(diff.changes.len != 0);
     } else if (std.mem.eql(u8, command, "merge") and files.items.len == 3) {
         const m = try d.merge(files.items[1], files.items[0], files.items[2], .{ .style = style });
@@ -74,7 +74,7 @@ fn smoke(gpa: std.mem.Allocator) !u8 {
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
     const diff = try d.lines("a\nb\n", "a\nc\n", .{});
-    try parallax.writeUnified(&out.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } });
+    try parallax.writeUnified(&out.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } }, .{});
     var patch = try parallax.patch.parse(gpa, out.written(), .{});
     defer patch.deinit();
     if (patch.files.len != 1) return error.SmokeFailed;
