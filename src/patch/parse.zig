@@ -12,7 +12,7 @@ const File = types.File;
 const hunk_mod = @import("hunk.zig");
 
 /// The lines of the patch, each with its newline.
-// aegis: design: docs/design.md#numeric-boundaries; Reader offsets advance only through bounded slices, while header arithmetic is checked separately.
+// docs/design.md#numeric-boundaries; Reader offsets advance only through bounded slices, while header arithmetic is checked separately.
 const Reader = struct {
     text: []const u8,
     at: usize = 0,

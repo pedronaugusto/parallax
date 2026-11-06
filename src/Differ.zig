@@ -33,7 +33,7 @@ table: table_mod.Table = .{},
 /// Private: line ends of up to three inputs.
 ends: [3]std.ArrayList(u32) = .{ .empty, .empty, .empty },
 /// Private: the ids of every line of the inputs, side after side.
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; line/table input bounds establish this compact one-domain class array.
+// docs/design.md#numeric-boundaries; line/table input bounds establish this compact one-domain class array.
 ids: std.ArrayList(u32) = .empty,
 /// Private: scripts; a merge keeps two.
 changes: std.ArrayList(Change) = .empty,
@@ -436,7 +436,7 @@ pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.Refine
     });
 }
 
-/// aegis: measured-boundary: docs/design.md#numeric-boundaries; class IDs
+/// docs/design.md#numeric-boundaries; class IDs
 /// have the scalar layout checked by their owner. Callers establish shared
 /// membership; runtime-safety builds also check it before kernel entry.
 fn rawIds(ids: []const class.ClassId) []const u32 {

@@ -18,7 +18,7 @@ const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
 const fit = @import("fit.zig");
 
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; anchors/backbone use bounded line indexes inside the validated raw kernel.
+// docs/design.md#numeric-boundaries; anchors/backbone use bounded line indexes inside the validated raw kernel.
 pub const Buffers = struct {
     slots: std.ArrayList(Slot) = .empty,
     piles: std.ArrayList(u32) = .empty,

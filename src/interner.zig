@@ -28,7 +28,7 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
         slots: std.ArrayList(Slot) = .empty,
 
         const Self = @This();
-        // aegis: measured-boundary: docs/design.md#numeric-boundaries; the one-domain probe loop stores class+1, reserving zero for an empty slot.
+        // docs/design.md#numeric-boundaries; the one-domain probe loop stores class+1, reserving zero for an empty slot.
         const Slot = struct { hash: u64, id: u32 };
 
         pub fn init(gpa: Allocator, context: Context) Self {
@@ -85,7 +85,7 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
             for (items, out) |item, *id| id.* = try s.intern(item);
         }
 
-        // aegis: design: docs/design.md#numeric-boundaries; the live slot extent and half-full invariant bound the double-size table plus scratch before allocation.
+        // docs/design.md#numeric-boundaries; the live slot extent and half-full invariant bound the double-size table plus scratch before allocation.
         fn grow(s: *Self) Allocator.Error!void {
             const old_len = s.slots.items.len;
             const new_len = @max(64, old_len * 2);

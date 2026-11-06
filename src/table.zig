@@ -24,7 +24,7 @@ pub const Texts = struct {
     }
 };
 
-// aegis: measured-boundary: docs/design.md#numeric-boundaries; splitAll bounds total lines before the packed one-domain class table is built.
+// docs/design.md#numeric-boundaries; splitAll bounds total lines before the packed one-domain class table is built.
 pub const Table = struct {
     /// Private: the slots, a power of two of them. A taken slot holds the
     /// high half of a line's hash (which also picks its slot) above its id
