@@ -445,6 +445,7 @@ pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.Refine
 /// Callers establish shared membership; runtime-safety builds also check it
 /// before kernel entry.
 fn rawIds(ids: []const class.ClassId) []const u32 {
-    // the kernels compare raw u32 class ids; ClassId is an enum(u32), the same size and alignment, every bit pattern a valid id
+    // The kernels compare raw u32 class ids; ClassId is an enum(u32), the same size and
+    // alignment, every bit pattern a valid id.
     return @ptrCast(ids);
 }
