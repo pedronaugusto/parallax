@@ -67,6 +67,7 @@ pub fn diff(
         .gpa = gpa,
         .classes = run.classes,
         .minimal = run.minimal,
+        // docs/design.md#numeric-boundaries; validated sweep cap enters the raw one-unit search kernel.
         .max_work = run.max_work.raw(),
         .stop = run.stop,
         .io = run.io,
@@ -118,20 +119,6 @@ fn IndentNew(comptime Source: type) type {
     };
 }
 
-/// A caller's test of one position of the old sequence.
-pub const Predicate = struct {
-    context: ?*const anyopaque = null,
-    at: *const fn (context: ?*const anyopaque, index: u32) bool,
-};
-
-/// A caller's indentation per token, for the indentation heuristic: -1 for
-/// a blank one.
-pub const Indent = struct {
-    context: ?*const anyopaque = null,
-    old: *const fn (context: ?*const anyopaque, index: u32) i32,
-    new: *const fn (context: ?*const anyopaque, index: u32) i32,
-};
-
 /// Lines of a diff, where the slide finds indentation and patience finds
 /// anchors.
 pub const LineSource = struct {
@@ -152,24 +139,34 @@ pub const LineSource = struct {
     }
 };
 
-/// A caller's id sequences, with the caller's anchors and indentation.
-pub const SequenceSource = struct {
-    anchor_fn: ?Predicate,
-    indent_fn: ?Indent,
+/// A caller's id sequences, with the anchors and indentation of the
+/// caller's context where it has them: `anchor(i: u32) bool` for an old
+/// position, and `indentOld(i: u32) i32` with `indentNew(i: u32) i32`, -1
+/// for a blank token.
+pub fn SequenceSource(comptime Context: type) type {
+    const has_indent = std.meta.hasMethod(Context, "indentOld");
+    if (has_indent != std.meta.hasMethod(Context, "indentNew")) @compileError("a sequence context has both indentOld and indentNew or neither");
+    return struct {
+        context: Context,
+        const Self = @This();
 
-    pub fn anchor(s: SequenceSource, i: u32) bool {
-        const p = s.anchor_fn orelse return false;
-        return p.at(p.context, i);
-    }
-    pub fn indentOld(s: SequenceSource, i: u32) i32 {
-        const f = s.indent_fn.?;
-        return f.old(f.context, i);
-    }
-    pub fn indentNew(s: SequenceSource, i: u32) i32 {
-        const f = s.indent_fn.?;
-        return f.new(f.context, i);
-    }
-};
+        /// Whether the slide asks the indentation heuristic.
+        pub const indent_heuristic = has_indent;
+
+        pub fn anchor(s: Self, i: u32) bool {
+            if (comptime std.meta.hasMethod(Context, "anchor")) return s.context.anchor(i);
+            return false;
+        }
+        pub fn indentOld(s: Self, i: u32) i32 {
+            if (comptime has_indent) return s.context.indentOld(i);
+            return -1;
+        }
+        pub fn indentNew(s: Self, i: u32) i32 {
+            if (comptime has_indent) return s.context.indentNew(i);
+            return -1;
+        }
+    };
+}
 
 /// No anchors and no indentation: the merge machinery's diffs.
 pub const Plain = struct {

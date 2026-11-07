@@ -33,6 +33,7 @@ table: table_mod.Table = .{},
 /// Private: line ends of up to three inputs.
 ends: [3]std.ArrayList(u32) = .{ .empty, .empty, .empty },
 /// Private: the ids of every line of the inputs, side after side.
+// docs/design.md#numeric-boundaries; line/table input bounds establish this compact one-domain class array.
 ids: std.ArrayList(u32) = .empty,
 /// Private: scripts; a merge keeps two.
 changes: std.ArrayList(Change) = .empty,
@@ -82,12 +83,6 @@ pub const Options = struct {
     io: ?std.Io = null,
 };
 
-/// A caller's test of one position of the old sequence.
-pub const Predicate = core.Predicate;
-
-/// A caller's indentation per token, for the indentation heuristic.
-pub const Indent = core.Indent;
-
 /// How a diff of two id sequences is taken.
 pub const SequenceOptions = struct {
     algorithm: Algorithm = .myers,
@@ -95,12 +90,6 @@ pub const SequenceOptions = struct {
     max_work: Work = .fromRaw(0),
     /// Every id is below this.
     classes: class.ClassCount,
-    /// Old-side positions to keep as context where possible (patience
-    /// only).
-    anchor: ?Predicate = null,
-    /// Per-token indentation for the indentation heuristic; null is the
-    /// plain slide.
-    indent: ?Indent = null,
     /// A flag the caller may raise, from another thread, to abandon the
     /// call. It is read once per work unit and once per histogram or
     /// patience region; from the first time it reads true, what is left is
@@ -250,14 +239,21 @@ pub fn lines(d: *Differ, old: []const u8, new: []const u8, options: Options) Err
         .io = options.io,
     }, &d.changes);
     var r = result;
-    // aegis: design(A014): a result borrows the workspace until the next call on `d`, as the file's contract says
+    // a result borrows the workspace until the next call on `d`, as the file's contract says
     r.changes = d.changes.items;
     return r;
 }
 
 /// Diff two interned sequences (every id below `options.classes`). The
-/// changes are valid until the next call on `d`.
-pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const class.ClassId, options: SequenceOptions) Error![]const Change {
+/// changes are valid until the next call on `d`. `context` is the caller's,
+/// `.{}` for none; each of its methods is optional:
+///
+/// - `anchor(i: u32) bool`: an old position to keep as context where an
+///   order allows (patience only);
+/// - `indentOld(i: u32) i32` and `indentNew(i: u32) i32`, both or neither:
+///   a token's indentation, -1 for a blank one, for the indentation
+///   heuristic; without them the slide is the plain one.
+pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const class.ClassId, options: SequenceOptions, context: anytype) Error![]const Change {
     const old = rawIds(old_ids);
     const new = rawIds(new_ids);
     d.work = 0;
@@ -269,12 +265,13 @@ pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const cl
         for (new_ids) |id| std.debug.assert(id.compare(bound) == .lt);
     }
     if (std.mem.eql(u32, old, new)) return d.changes.items;
-    d.work = try core.diff(core.SequenceSource, d.gpa, .{ .anchor_fn = options.anchor, .indent_fn = options.indent }, &d.scratch, old, new, .{
+    const Source = core.SequenceSource(@TypeOf(context));
+    d.work = try core.diff(Source, d.gpa, .{ .context = context }, &d.scratch, old, new, .{
         .algorithm = options.algorithm,
         .minimal = options.minimal,
         .max_work = options.max_work.convert(u64),
         .classes = options.classes.raw(),
-        .indent_heuristic = options.indent != null,
+        .indent_heuristic = Source.indent_heuristic,
         .stop = options.stop,
         .io = options.io,
     }, &d.changes);
@@ -297,7 +294,7 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
     // The sides git takes whole: both the same, or one side with no change.
     if (std.mem.eql(u8, ours, theirs)) {
         try d.whole(if (std.mem.eql(u8, base, ours)) .unchanged else .same, lens);
-        // aegis: design(A014): a result borrows the workspace until the next call on `d`, as the file's contract says
+        // a result borrows the workspace until the next call on `d`, as the file's contract says
         result.regions = regions.items;
         return result;
     }
@@ -319,14 +316,14 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
     if (!std.mem.eql(u8, base, ours)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, ids_b, ids_o, run, &d.changes);
     if (d.changes.items.len == 0) {
         try d.whole(.theirs, lens);
-        // aegis: design(A014): a result borrows the workspace until the next call on `d`, as the file's contract says
+        // a result borrows the workspace until the next call on `d`, as the file's contract says
         result.regions = regions.items;
         return result;
     }
     if (!std.mem.eql(u8, base, theirs)) d.work += try core.diff(core.Plain, d.gpa, .{}, &d.scratch, ids_b, ids_t, run, &d.changes_theirs);
     if (d.changes_theirs.items.len == 0) {
         try d.whole(.ours, lens);
-        // aegis: design(A014): a result borrows the workspace until the next call on `d`, as the file's contract says
+        // a result borrows the workspace until the next call on `d`, as the file's contract says
         result.regions = regions.items;
         return result;
     }
@@ -345,16 +342,20 @@ pub fn merge(d: *Differ, base: []const u8, ours: []const u8, theirs: []const u8,
         .level = options.level,
         .stop = options.stop,
         .io = options.io,
-    }, d.changes.items, d.changes_theirs.items);
-    // aegis: design(A014): a result borrows the workspace until the next call on `d`, as the file's contract says
+    }, .{}, d.changes.items, d.changes_theirs.items);
+    // a result borrows the workspace until the next call on `d`, as the file's contract says
     result.regions = regions.items;
     return result;
 }
 
 /// The three-way merge of two interned sequences against a third (every id
 /// below `options.classes`), as regions over the three. Valid until the
-/// next call on `d`.
-pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []const class.ClassId, their_ids: []const class.ClassId, options: threeway.SequenceOptions) Error!threeway.SequenceMerge {
+/// next call on `d`. `context` is the caller's, `.{}` for none; it may have
+/// `content(i: u32) bool`, whether our token at an index holds content:
+/// `.zealous_alnum` joins two conflicts with only tokens without content
+/// between them, as it joins lines with no letter or digit. Without it every
+/// token has content, and `.zealous_alnum` is `.zealous`.
+pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []const class.ClassId, their_ids: []const class.ClassId, options: threeway.SequenceOptions, context: anytype) Error!threeway.SequenceMerge {
     const base = rawIds(base_ids);
     const ours = rawIds(our_ids);
     const theirs = rawIds(their_ids);
@@ -400,14 +401,14 @@ pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []co
         .ids_ours = ours,
         .ids_theirs = theirs,
         .classes = options.classes.raw(),
-        .source = .{ .sequence = options.content },
+        .source = .sequence,
         .algorithm = options.algorithm,
         .minimal = options.minimal,
         .style = options.style,
         .level = options.level,
         .stop = options.stop,
         .io = options.io,
-    }, d.changes.items, d.changes_theirs.items);
+    }, context, d.changes.items, d.changes_theirs.items);
     return .{ .regions = regions.items, .conflicts = conflicts };
 }
 
@@ -444,6 +445,6 @@ pub fn refine(d: *Differ, diff: Diff, change: Change, options: refine_mod.Refine
 /// Callers establish shared membership; runtime-safety builds also check it
 /// before kernel entry.
 fn rawIds(ids: []const class.ClassId) []const u32 {
-    // aegis: hot-loop(A019): the kernels compare raw u32 class ids; ClassId is an enum(u32), the same size and alignment, every bit pattern a valid id
+    // the kernels compare raw u32 class ids; ClassId is an enum(u32), the same size and alignment, every bit pattern a valid id
     return @ptrCast(ids);
 }

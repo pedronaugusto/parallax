@@ -159,7 +159,7 @@ test "a base shifted by inserted lines applies with that offset" {
     const diff = try d.lines(old, new, .{});
     var text: std.Io.Writer.Allocating = .init(gpa);
     defer text.deinit();
-    try parallax.writeUnified(&text.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } });
+    try parallax.writeUnified(&text.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } }, .{});
     var p = try parallax.patch.parse(gpa, text.written(), .{});
     defer p.deinit();
     var results: [1]parallax.patch.HunkResult = undefined;

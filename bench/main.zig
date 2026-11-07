@@ -204,14 +204,14 @@ fn functions(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !vo
     const p = try gen.w10(gpa, if (config.smoke) 50 else 20_000);
     defer p.deinit(gpa);
     const diff = try d.lines(p.old, p.new, .{});
-    for ([_]struct { []const u8, ?parallax.Heading }{ .{ "plain", null }, .{ "-W", .c_function } }) |case| {
+    for ([_]struct { []const u8, bool }{ .{ "plain", false }, .{ "-W", true } }) |case| {
         var best: f64 = std.math.inf(f64);
         var written: usize = 0;
         for (0..config.runs + 1) |run| {
             var discard_buffer: [4096]u8 = undefined;
             var discard: Io.Writer.Discarding = .init(&discard_buffer);
             const t0 = r.now();
-            try parallax.writeUnified(&discard.writer, diff, .{ .heading = .c_function, .hunks = .{ .function_context = case[1] } });
+            try parallax.writeUnified(&discard.writer, diff, .{ .function_names = true, .hunks = .{ .function_context = case[1] } }, .{});
             try discard.writer.flush();
             const t1 = r.now();
             written = @intCast(discard.fullCount());
@@ -469,7 +469,7 @@ fn mergeExtras(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, t
         const m = try d.merge(t.base, t.ours, t.theirs, .{ .algorithm = .histogram, .level = .zealous });
         std.mem.doNotOptimizeAway(m.regions.len);
         const t1 = r.now();
-        const s = try d.mergeSequences(ids[0], ids[1], ids[2], .{ .algorithm = .histogram, .level = .zealous, .classes = interner.classes() });
+        const s = try d.mergeSequences(ids[0], ids[1], ids[2], .{ .algorithm = .histogram, .level = .zealous, .classes = interner.classes() }, .{});
         std.mem.doNotOptimizeAway(s.regions.len);
         const t2 = r.now();
         if (run != 0) {
@@ -524,7 +524,7 @@ fn patches(r: Report, gpa: Allocator, config: Config) !void {
         const diff = try d.lines(p.old, p.new, .{});
         var out: Io.Writer.Allocating = .init(gpa);
         defer out.deinit();
-        try parallax.writeUnified(&out.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } });
+        try parallax.writeUnified(&out.writer, diff, .{ .files = .{ .old = "a/f", .new = "b/f" } }, .{});
         c.patch = try out.toOwnedSlice();
         c.bases[0] = try gpa.dupe(u8, p.old);
         c.bases[1] = try std.mem.concat(gpa, u8, &.{ "one\ntwo\nthree\n", p.old });

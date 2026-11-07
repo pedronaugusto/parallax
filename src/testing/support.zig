@@ -137,7 +137,7 @@ pub fn diffOne(_: void, case: *shakedown.Case) !void {
     // Whole functions: the same, except that a hunk may overlap the one
     // before, as git's do.
     var whole = hunk_options;
-    whole.function_context = .c_function;
+    whole.function_context = true;
     try expectHunks(diff, whole);
     if (o.stop != null) return;
     if (o.max_work.eql(.fromRaw(0)) and !o.minimal) {
@@ -160,11 +160,11 @@ fn expectHunks(diff: parallax.Diff, hunk_options: parallax.HunkOptions) !void {
     var old_end: u32 = 0;
     var new_end: u32 = 0;
     var next_change: usize = 0;
-    while (it.next()) |h| {
+    while (it.next(.{})) |h| {
         try std.testing.expect(h.old_start + h.old_len <= diff.old.len());
         try std.testing.expect(h.new_start + h.new_len <= diff.new.len());
         // Whole functions may overlap the hunk before, as git's do.
-        if (hunk_options.function_context == null) try std.testing.expect(h.old_start >= old_end and h.new_start >= new_end);
+        if (!hunk_options.function_context) try std.testing.expect(h.old_start >= old_end and h.new_start >= new_end);
         try std.testing.expect(h.changes.len != 0);
         var first = next_change;
         while (diff.changes[first].old_start != h.changes[0].old_start) first += 1;
@@ -330,11 +330,14 @@ fn expectSide(read: []const u8, lines: []const u8) !void {
     } else try std.testing.expectEqualStrings(lines, read);
 }
 
-fn hasContent(context: ?*const anyopaque, i: u32) bool {
-    const lines: *const parallax.Lines = @ptrCast(@alignCast(context.?)); // safe: the caller passes its Lines
-    for (lines.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true;
-    return false;
-}
+/// Our lines' content as git's line merge reads it: a letter or digit.
+const LineContent = struct {
+    ours: parallax.Lines,
+    pub fn content(l: LineContent, i: u32) bool {
+        for (l.ours.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true;
+        return false;
+    }
+};
 
 /// `m`, merged again over interned lines, gives the same regions.
 fn expectSequenceMerge(d: *parallax.Differ, m: parallax.merge.Merge, o: parallax.merge.Options) !void {
@@ -358,8 +361,7 @@ fn expectSequenceMerge(d: *parallax.Differ, m: parallax.merge.Merge, o: parallax
         .classes = interner.classes(),
         .style = o.style,
         .level = o.level,
-        .content = .{ .context = @ptrCast(&ours), .at = hasContent }, // safe: hasContent reads it back as Lines
-    });
+    }, LineContent{ .ours = ours });
     try std.testing.expectEqual(m.conflicts, sequence.conflicts);
     try std.testing.expectEqualSlices(parallax.merge.Region, regions, sequence.regions);
 }
@@ -436,7 +438,7 @@ pub fn sequenceOne(_: void, case: *shakedown.Case) !void {
         .algorithm = algorithms[gen.intRange(s, usize, 0, 2)],
         .minimal = gen.boolean(s),
         .max_work = .fromRaw(if (gen.weighted(s, &.{ 3, 1 }) == 1) 2 else 0),
-    });
+    }, .{});
     var at_old: u32 = 0;
     var at_new: u32 = 0;
     for (changes) |c| {
@@ -464,9 +466,9 @@ pub fn patchOne(_: void, case: *shakedown.Case) !void {
     defer written.deinit();
     try parallax.writeUnified(&written.writer, diff, .{
         .hunks = .{ .context = @intCast(gen.intRange(s, usize, 0, 5)), .inter_hunk_context = @intCast(gen.intRange(s, usize, 0, 2)) },
-        .heading = if (gen.boolean(s)) .c_function else null,
+        .function_names = gen.boolean(s),
         .files = .{ .old = "a/f", .new = "b/f" },
-    });
+    }, .{});
     var p = try parallax.patch.parse(gpa, written.written(), .{});
     defer p.deinit();
     if (diff.changes.len == 0) return std.testing.expectEqual(@as(usize, 0), p.files.len);

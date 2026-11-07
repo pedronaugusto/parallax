@@ -13,7 +13,7 @@ pub fn main(init: std.process.Init) !void {
     // The unified body, as `git diff` prints it.
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
-    try parallax.writeUnified(&out.writer, diff, .{ .heading = .c_function });
+    try parallax.writeUnified(&out.writer, diff, .{ .function_names = true }, .{});
     std.debug.assert(std.mem.eql(u8, out.written(), "@@ -1,3 +1,4 @@\n a\n-b\n+B\n c\n+d\n"));
     // --- README:usage ---
     try merging(gpa);
@@ -58,7 +58,7 @@ fn refining(gpa: std.mem.Allocator) !void {
     var b: [3]parallax.ClassId = undefined;
     try interner.internSlice(&.{ "red", "green", "blue" }, &a);
     try interner.internSlice(&.{ "red", "yellow", "blue" }, &b);
-    const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() });
+    const changes = try differ.sequences(&a, &b, .{ .classes = interner.classes() }, .{});
     std.debug.assert(changes.len == 1);
     std.debug.assert(changes[0].old_start == 1);
     // --- README:refine ---

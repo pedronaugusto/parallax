@@ -17,6 +17,7 @@ pub const Line = struct {
 
 /// One `@@` hunk, with its ranges as written: 1-based, and for an empty
 /// range the line before it.
+// docs/design.md#numeric-boundaries; parsed textual u32 ranges are count-validated and widened to i64 before application arithmetic.
 pub const Hunk = struct {
     old_start: u32,
     old_len: u32,

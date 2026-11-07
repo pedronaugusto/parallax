@@ -75,6 +75,7 @@ pub const Context = struct {
     minimal: bool,
     /// Work units before the search describes what is left coarsely; 0 is
     /// no cap.
+    // docs/design.md#numeric-boundaries; core unwraps a Work cap once; the loop counts only sweeps.
     max_work: u64,
     /// Work units spent, over every search the diff makes.
     work: u64 = 0,

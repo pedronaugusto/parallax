@@ -75,24 +75,24 @@ test "hunks join when their context touches and split when it does not" {
     defer d.deinit();
     try std.testing.expectEqual(@as(usize, 3), d.diff.changes.len);
     var it = d.diff.hunks(.{ .context = 3 });
-    const first = it.next().?;
+    const first = it.next(.{}).?;
     try std.testing.expectEqual(@as(usize, 2), first.changes.len);
     try std.testing.expectEqual(@as(u32, 0), first.old_start);
     try std.testing.expectEqual(@as(u32, 12), first.old_len);
-    const second = it.next().?;
+    const second = it.next(.{}).?;
     try std.testing.expectEqual(@as(usize, 1), second.changes.len);
     try std.testing.expectEqual(@as(u32, 22), second.old_start);
     try std.testing.expectEqual(@as(u32, 7), second.old_len);
-    try std.testing.expect(it.next() == null);
+    try std.testing.expect(it.next(.{}) == null);
     // One line of context leaves the first two too far apart; inter-hunk
     // context joins them again.
     var narrow = d.diff.hunks(.{ .context = 1 });
     var n: usize = 0;
-    while (narrow.next()) |_| n += 1;
+    while (narrow.next(.{})) |_| n += 1;
     try std.testing.expectEqual(@as(usize, 3), n);
     var joined = d.diff.hunks(.{ .context = 1, .inter_hunk_context = 3 });
     n = 0;
-    while (joined.next()) |_| n += 1;
+    while (joined.next(.{})) |_| n += 1;
     try std.testing.expectEqual(@as(usize, 2), n);
 }
 
@@ -100,9 +100,9 @@ test "hunks clamp their context at both ends of the file" {
     var d = try parallax.diffLines(std.testing.allocator, "a\nb\n", "A\nb\n", .{});
     defer d.deinit();
     var it = d.diff.hunks(.{ .context = 3 });
-    const h = it.next().?;
+    const h = it.next(.{}).?;
     try std.testing.expectEqual(parallax.Hunk{ .old_start = 0, .old_len = 2, .new_start = 0, .new_len = 2, .changes = h.changes }, h);
-    try std.testing.expect(it.next() == null);
+    try std.testing.expect(it.next(.{}) == null);
 }
 
 test "whitespace flags change what counts as equal, and ranges still index the real lines" {
@@ -242,7 +242,7 @@ fn expectUnified(old: []const u8, new: []const u8, options: parallax.UnifiedOpti
     defer d.deinit();
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try parallax.writeUnified(&out.writer, d.diff, options);
+    try parallax.writeUnified(&out.writer, d.diff, options, .{});
     try std.testing.expectEqualStrings(want, out.written());
 }
 
@@ -260,7 +260,7 @@ test "the heading on a hunk header is cut at eighty bytes" {
     defer d.deinit();
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try parallax.writeUnified(&out.writer, d.diff, .{ .heading = .c_function });
+    try parallax.writeUnified(&out.writer, d.diff, .{ .function_names = true }, .{});
     try std.testing.expect(std.mem.startsWith(u8, out.written(), "@@ -5,4 +5,4 @@ " ++ long[0..80] ++ "\n"));
 }
 

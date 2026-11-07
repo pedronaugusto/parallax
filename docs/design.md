@@ -127,7 +127,7 @@ presentation does not change the script.
 Changes join across at most `2 * context + inter_hunk_context` common lines.
 An all-ignorable change does not open or extend a hunk by itself but can print
 inside another hunk. Context is clamped at file boundaries. Function context
-uses the caller's `Heading` to include whole functions and preceding comment
+uses the caller's `heading` to include whole functions and preceding comment
 lines; its resulting hunks may overlap. The unified writer owns range syntax,
 heading search/truncation, context from the new side and missing-newline
 markers. Optional file names produce plain unified headers. Application-specific

@@ -20,7 +20,7 @@ test "a sequence of any type diffs through the interner as lines do" {
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
     for ([_]parallax.Algorithm{ .myers, .patience, .histogram }) |algorithm| {
-        const changes = try d.sequences(&old_ids, &new_ids, .{ .classes = interner.classes(), .algorithm = algorithm });
+        const changes = try d.sequences(&old_ids, &new_ids, .{ .classes = interner.classes(), .algorithm = algorithm }, .{});
         try std.testing.expectEqualSlices(parallax.Change, &.{
             .{ .old_start = 1, .old_len = 1, .new_start = 1, .new_len = 1 },
             .{ .old_start = 5, .old_len = 0, .new_start = 5, .new_len = 1 },
@@ -41,16 +41,16 @@ test "sequences take a caller's anchors and indentation" {
         fn of(ids: []const parallax.ClassId, i: u32) i32 {
             return indents[ids[i].raw()];
         }
-        fn oldIndent(_: ?*const anyopaque, i: u32) i32 {
+        pub fn indentOld(_: @This(), i: u32) i32 {
             return of(&old, i);
         }
-        fn newIndent(_: ?*const anyopaque, i: u32) i32 {
+        pub fn indentNew(_: @This(), i: u32) i32 {
             return of(&new, i);
         }
     };
-    const heuristic = try d.sequences(&old, &new, .{ .classes = .fromRaw(5), .indent = .{ .old = Ctx.oldIndent, .new = Ctx.newIndent } });
+    const heuristic = try d.sequences(&old, &new, .{ .classes = .fromRaw(5) }, Ctx{});
     try std.testing.expectEqualSlices(parallax.Change, &.{.{ .old_start = 3, .old_len = 0, .new_start = 3, .new_len = 3 }}, heuristic);
-    const plain = try d.sequences(&old, &new, .{ .classes = .fromRaw(5) });
+    const plain = try d.sequences(&old, &new, .{ .classes = .fromRaw(5) }, .{});
     try std.testing.expectEqualSlices(parallax.Change, &.{.{ .old_start = 4, .old_len = 0, .new_start = 4, .new_len = 3 }}, plain);
 }
 

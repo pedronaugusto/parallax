@@ -101,7 +101,7 @@ pub const Merge = struct {
 
 /// One region in xdiff's terms, signed as xdiff's are.
 const Hunk = struct {
-    // aegis: design(A017): a hunk's kind in xdiff's terms, merged as xdiff merges two (a kind that differs is a conflict), not a lifecycle
+    // a hunk's kind in xdiff's terms, merged as xdiff merges two (a kind that differs is a conflict), not a lifecycle
     mode: Mode,
     at0: i64,
     len0: i64,
@@ -131,11 +131,6 @@ pub const SequenceOptions = struct {
     /// ends both sides agree on moved out of each conflict.
     style: Style = .merge,
     level: Level = .zealous_alnum,
-    /// Whether our token at an index holds content: `.zealous_alnum` joins
-    /// two conflicts with only tokens without content between them, as it
-    /// joins lines with no letter or digit. Null: every token has content,
-    /// and `.zealous_alnum` is `.zealous`.
-    content: ?core.Predicate = null,
     /// As `Options.stop`.
     stop: ?*const std.atomic.Value(bool) = null,
     /// As `Options.io`.
@@ -155,8 +150,8 @@ pub const Source = union(enum) {
     /// Lines: the texts settle the comparison's one quirk when two ids
     /// differ, and say which lines hold a letter or digit.
     lines: struct { ours: Lines, theirs: Lines, compare: Compare },
-    /// Sequences: ids alone, and the caller's test of content.
-    sequence: ?core.Predicate,
+    /// Sequences: ids alone, content by the caller's context.
+    sequence,
 };
 
 /// Everything one merge reads.
@@ -180,8 +175,9 @@ pub const Input = struct {
 
 /// The merge whose scripts against the base are `xs1` (ours) and `xs2`
 /// (theirs), neither empty, as regions in `in.buffers.regions`. Returns the
-/// number of conflicts.
-pub fn solve(in: Input, xs1: []const Change, xs2: []const Change) core.Error!u32 {
+/// number of conflicts. `context` is `Differ.mergeSequences`' for a
+/// sequence, `.{}` for lines.
+pub fn solve(in: Input, context: anytype, xs1: []const Change, xs2: []const Change) core.Error!u32 {
     const b = in.buffers;
     b.hunks.clearRetainingCapacity();
     b.same.clearRetainingCapacity();
@@ -194,7 +190,7 @@ pub fn solve(in: Input, xs1: []const Change, xs2: []const Change) core.Error!u32
         .zdiff3 => trim(in),
         .merge, .diff3 => if (@backingInt(level) >= @backingInt(Level.zealous)) {
             try refine(in);
-            join(in, level == .zealous_alnum);
+            join(in, context, level == .zealous_alnum);
         },
     }
     return regions(in);
@@ -352,14 +348,14 @@ fn refine(in: Input) core.Error!void {
 /// `xdl_simplify_non_conflicts`: two conflicts with three lines or fewer
 /// between them read more easily as one, and so, with `without_alnum`, do
 /// two with nothing but punctuation and space between them.
-fn join(in: Input, without_alnum: bool) void {
+fn join(in: Input, context: anytype, without_alnum: bool) void {
     const hunks = &in.buffers.hunks;
     var at: usize = 0;
     while (at + 1 < hunks.items.len) {
         const m = &hunks.items[at];
         const next = hunks.items[at + 1];
         const begin = m.at1 + m.len1;
-        const far = next.at1 - begin > 3 and (!without_alnum or anyContent(in.source, begin, next.at1 - begin));
+        const far = next.at1 - begin > 3 and (!without_alnum or anyContent(in.source, context, begin, next.at1 - begin));
         if (m.mode != .conflict or next.mode != .conflict or far) {
             at += 1;
             continue;
@@ -372,17 +368,17 @@ fn join(in: Input, without_alnum: bool) void {
 }
 
 /// `lines_contain_alnum`: whether any of our lines holds an ASCII letter or
-/// digit; for a sequence, whether any of our tokens holds content.
-fn anyContent(source: Source, at: i64, n: i64) bool {
+/// digit; for a sequence, whether any of our tokens holds content by
+/// `context.content`, every token where it has none.
+fn anyContent(source: Source, context: anytype, at: i64, n: i64) bool {
     var k: i64 = 0;
     while (k < n) : (k += 1) {
         const i: u32 = @intCast(at + k);
         switch (source) {
             .lines => |l| for (l.ours.get(i)) |c| if (std.ascii.isAlphanumeric(c)) return true,
-            .sequence => |content| {
-                const p = content orelse return true;
-                if (p.at(p.context, i)) return true;
-            },
+            .sequence => if (comptime std.meta.hasMethod(@TypeOf(context), "content")) {
+                if (context.content(i)) return true;
+            } else return true,
         }
     }
     return false;

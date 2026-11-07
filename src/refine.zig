@@ -59,6 +59,7 @@ pub const RefineOptions = struct {
 };
 
 /// Bytes `start .. start + len` of a side's text, changed or not.
+// docs/design.md#numeric-boundaries; bounded token/line ends produce compact byte-only span views for iteration.
 pub const Span = struct { start: u32, len: u32, changed: bool };
 
 /// Spans covering the change's lines on each side, in order. No span
@@ -192,6 +193,7 @@ pub fn refine(in: Input) Error!Refined {
         var at = froms[s];
         const ids = if (s == 0) b.ids.items[0..n_old] else b.ids.items[n_old..];
         for (b.ends[s].items, ids) |end, *id| {
+            // docs/design.md#numeric-boundaries; interned classes enter the raw token kernel after bounded tokenization.
             id.* = (interner.intern(sides[s].text[at..end]) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 // Fewer tokens than bytes, and the inputs are under 4 GiB.
