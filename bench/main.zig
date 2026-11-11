@@ -186,7 +186,7 @@ pub fn main(init: std.process.Init) !void {
 fn stopRows(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, lines: usize, w3b: gen.Pair) !void {
     const w2 = try gen.w2(gpa, lines, 0.1);
     defer w2.deinit(gpa);
-    const flag: std.atomic.Value(bool) = .init(false);
+    const flag: parallax.Stop = .init(.no);
     for ([_]struct { []const u8, gen.Pair }{ .{ "W2 10%", w2 }, .{ "W3b", w3b } }) |case| {
         const plain = try timeLines(r, d, config, case[1], .{});
         const watched = try timeLines(r, d, config, case[1], .{ .stop = &flag });

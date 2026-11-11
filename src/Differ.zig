@@ -47,6 +47,10 @@ work: u64 = 0,
 
 /// The number of Myers forward/backward sweeps.
 pub const Work = core.Work;
+/// A caller's stop flag (`Options.stop`).
+pub const Stop = core.Stop;
+/// Whether a stop flag is raised.
+pub const Raised = core.Raised;
 /// Retained storage in bytes.
 pub const Bytes = fit.Bytes;
 
@@ -75,7 +79,7 @@ pub const Options = struct {
     /// described as one deletion and one insertion, as when `max_work` runs
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
-    stop: ?*const std.atomic.Value(bool) = null,
+    stop: ?*const core.Stop = null,
     /// The caller's Io. When given, the call asks it once per work unit and
     /// once per histogram or patience region whether the calling task is
     /// canceled, and returns `error.Canceled` if so: the call is abandoned,
@@ -96,7 +100,7 @@ pub const SequenceOptions = struct {
     /// described as one deletion and one insertion, as when `max_work` runs
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
-    stop: ?*const std.atomic.Value(bool) = null,
+    stop: ?*const core.Stop = null,
     /// The caller's Io. When given, the call asks it once per work unit and
     /// once per histogram or patience region whether the calling task is
     /// canceled, and returns `error.Canceled` if so: the call is abandoned,

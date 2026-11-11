@@ -122,7 +122,7 @@ pub fn diffOne(_: void, case: *shakedown.Case) !void {
     var o = options(s);
     // A stop flag raised before the call: the script is coarse, and still
     // applies.
-    const raised: std.atomic.Value(bool) = .init(true);
+    const raised: parallax.Stop = .init(.yes);
     if (gen.weighted(s, &.{ 5, 1 }) == 1) o.stop = &raised;
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- A caller's stop flag is `parallax.Stop`, an aegis `Atomic` of `parallax.Raised` (`no`, `yes`), where it was a `std.atomic.Value(bool)`: `Options.stop`, `SequenceOptions.stop` and the merge's options take `?*const parallax.Stop`. Make one with `.init(.no)` and raise it with `store(.yes, .monotonic)` where `store(true, ...)` was.
+
 ### Changed
 
 - On aegis 0.2.3 (the aegis 0.2 line), developed with preflight 0.18.4. The interner's slot holds an optional class where it held the class plus one, zero for empty.

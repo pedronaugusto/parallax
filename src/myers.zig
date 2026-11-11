@@ -13,6 +13,7 @@
 //! recursion would, which keeps `max_work` reproducible.
 
 const std = @import("std");
+const core = @import("core.zig");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 /// What a search can fail with: memory, or the caller's task canceled.
@@ -79,9 +80,9 @@ pub const Context = struct {
     max_work: u64,
     /// Work units spent, over every search the diff makes.
     work: u64 = 0,
-    /// A caller's flag: once it reads true, what is left is described
+    /// A caller's flag: once it is raised, what is left is described
     /// coarsely, as when `max_work` runs out.
-    stop: ?*const std.atomic.Value(bool) = null,
+    stop: ?*const core.Stop = null,
     /// The caller's Io: once per work unit and once per region the search
     /// asks it whether the calling task is canceled, and ends with
     /// `error.Canceled` if so.
@@ -92,7 +93,7 @@ pub const Context = struct {
     /// unit and once per region.
     pub fn stopped(c: *const Context) bool {
         const flag = c.stop orelse return false;
-        return flag.load(.monotonic);
+        return flag.load(.monotonic) == .yes;
     }
 
     /// `error.Canceled` when the caller's task is canceled. Asked once per

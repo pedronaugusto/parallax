@@ -234,7 +234,7 @@ test "a stop flag raised before a diff leaves no work and a script that applies"
     const gpa = std.testing.allocator;
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
-    const raised: std.atomic.Value(bool) = .init(true);
+    const raised: parallax.Stop = .init(.yes);
     for ([_][]const u8{ "W3b", "W3c", "W3d" }) |name| {
         const pair = try workload(gpa, name);
         defer pair.deinit(gpa);
@@ -258,9 +258,9 @@ test "a stop flag raised before a diff leaves no work and a script that applies"
 /// Raises its flag the first time patience asks about an anchor: a caller
 /// stopping the diff while it runs.
 const RaiseOnFirstAnchor = struct {
-    flag: *std.atomic.Value(bool),
+    flag: *parallax.Stop,
     pub fn anchor(r: RaiseOnFirstAnchor, _: u32) bool {
-        r.flag.store(true, .monotonic);
+        r.flag.store(.yes, .monotonic);
         return false;
     }
 };
@@ -280,13 +280,13 @@ test "a stop flag raised while a diff runs ends it early with a script that appl
     defer gpa.free(new);
     const whole = try gpa.dupe(parallax.Change, try d.sequences(old, new, .{ .classes = .fromRaw(classes), .algorithm = .patience }, .{}));
     defer gpa.free(whole);
-    var flag: std.atomic.Value(bool) = .init(false);
+    var flag: parallax.Stop = .init(.no);
     const stopped = try d.sequences(old, new, .{
         .classes = .fromRaw(classes),
         .algorithm = .patience,
         .stop = &flag,
     }, RaiseOnFirstAnchor{ .flag = &flag });
-    try std.testing.expect(flag.load(.monotonic));
+    try std.testing.expect(flag.load(.monotonic) == .yes);
     // Coarser: fewer, larger changes, still a script from old to new.
     try std.testing.expect(stopped.len < whole.len);
     var at_old: u32 = 0;

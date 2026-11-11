@@ -20,6 +20,12 @@ through `b.dependency` and add it to your executable's imports. Computation uses
 published aegis and std and makes no OS calls; it builds for every target,
 wasm32-freestanding included.
 
+## Stability
+
+parallax is 0.x and tracks Zig 0.17.x. A breaking change comes only in a minor release
+(0.3 to 0.4), with a CHANGELOG entry saying what changed and what to write instead; a
+patch release never breaks.
+
 ## Usage
 
 A `Differ` is the workspace every diff goes through; a diff borrows it until the

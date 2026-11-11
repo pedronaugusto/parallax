@@ -42,6 +42,10 @@ pub const Diff = script.Diff;
 pub const Differ = @import("Differ.zig");
 /// Myers forward/backward sweep count.
 pub const Work = Differ.Work;
+/// A caller's stop flag, which a diff reads while it runs.
+pub const Stop = Differ.Stop;
+/// Whether a stop flag is raised.
+pub const Raised = Differ.Raised;
 /// Retained storage byte count for `Differ.shrink`.
 pub const Bytes = Differ.Bytes;
 /// How a line diff is taken.

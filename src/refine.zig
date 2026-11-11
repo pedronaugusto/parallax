@@ -50,7 +50,7 @@ pub const RefineOptions = struct {
     /// described as one deletion and one insertion, as when `max_work` runs
     /// out, so the call returns soon with a result that is correct but
     /// coarse. The caller that raised it knows to discard that result.
-    stop: ?*const std.atomic.Value(bool) = null,
+    stop: ?*const core.Stop = null,
     /// The caller's Io. When given, the call asks it once per work unit and
     /// once per histogram or patience region whether the calling task is
     /// canceled, and returns `error.Canceled` if so: the call is abandoned,

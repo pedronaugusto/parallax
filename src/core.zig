@@ -27,6 +27,11 @@ pub const Buffers = struct {
 
 /// Myers forward/backward sweep count, distinct from lines and bytes.
 pub const Work = aegis.units.Count(struct {}, u32);
+/// Whether a caller asked a diff to stop.
+pub const Raised = enum(u8) { no, yes };
+/// A caller's stop flag: raised once (`store(.yes, ...)`), read by the search once
+/// per work unit and once per region.
+pub const Stop = aegis.Atomic(Raised);
 const KernelWork = aegis.units.Count(Work.Domain, u64);
 comptime {
     std.debug.assert(@sizeOf(Work) == @sizeOf(u32));
@@ -42,7 +47,7 @@ pub const Run = struct {
     max_work: KernelWork,
     classes: u32,
     indent_heuristic: bool,
-    stop: ?*const std.atomic.Value(bool) = null,
+    stop: ?*const Stop = null,
     io: ?std.Io = null,
 };
 

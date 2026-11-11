@@ -37,6 +37,10 @@ pub const Diff = diff.Diff;
 pub const Differ = diff.Differ;
 /// Myers forward/backward sweep count.
 pub const Work = diff.Work;
+/// A caller's stop flag (`Options.stop`).
+pub const Stop = diff.Stop;
+/// Whether a stop flag is raised.
+pub const Raised = diff.Raised;
 /// Retained storage byte count for `Differ.shrink`.
 pub const Bytes = diff.Bytes;
 /// How a line diff is taken.
