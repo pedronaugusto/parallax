@@ -148,7 +148,7 @@ pub fn dev(b: *std.Build, tools: type) void {
                 .{ .name = "parallax-cli", .source = "bench/cli.zig", .timed = false },
                 .{ .name = "bench-corpus", .source = "bench/corpus.zig", .timed = false },
             },
-            .imports = benchImports,
+            .imports = tools.preflight.Bench.importsFrom(benchImports),
             .target = target,
             .optimize = optimize,
         },
