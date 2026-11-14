@@ -28,10 +28,9 @@ pub const Buffers = struct {
 /// Myers forward/backward sweep count, distinct from lines and bytes.
 pub const Work = aegis.units.Count(struct {}, u32);
 /// Whether a caller asked a diff to stop.
-pub const Raised = enum(u8) { no, yes };
-/// A caller's stop flag: raised once (`store(.yes, ...)`), read by the search once
-/// per work unit and once per region.
-pub const Stop = aegis.Atomic(Raised);
+pub const Raised = @import("stop.zig").Raised;
+/// A caller's stop flag (`stop.zig`).
+pub const Stop = @import("stop.zig").Stop;
 const KernelWork = aegis.units.Count(Work.Domain, u64);
 comptime {
     aegis.assert.invariant(@sizeOf(Work) == @sizeOf(u32), "@sizeOf(Work) == @sizeOf(u32)");

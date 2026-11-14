@@ -8,6 +8,7 @@ pub const layers: []const gantry.rules.Layer = &.{
         "src/lines.zig",
         "src/flags.zig",
         "src/interner.zig",
+        "src/stop.zig",
     } },
     .{ .name = "changes", .patterns = &.{
         "src/change.zig",

@@ -13,7 +13,7 @@
 //! recursion would, which keeps `max_work` reproducible.
 
 const std = @import("std");
-const core = @import("core.zig");
+const Stop = @import("stop.zig").Stop;
 const Allocator = std.mem.Allocator;
 const assert = aegis.assert.invariant;
 /// What a search can fail with: memory, or the caller's task canceled.
@@ -83,7 +83,7 @@ pub const Context = struct {
     work: u64 = 0,
     /// A caller's flag: once it is raised, what is left is described
     /// coarsely, as when `max_work` runs out.
-    stop: ?*const core.Stop = null,
+    stop: ?*const Stop = null,
     /// The caller's Io: once per work unit and once per region the search
     /// asks it whether the calling task is canceled, and ends with
     /// `error.Canceled` if so.
