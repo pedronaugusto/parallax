@@ -6,12 +6,13 @@
 //! a reader expects.
 
 const std = @import("std");
-const assert = std.debug.assert;
+const assert = aegis.assert.invariant;
 /// Change flags shared by the algorithm entry points.
 pub const Flags = @import("flags.zig").Flags;
 const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
 const compare = @import("compare.zig");
+const aegis = @import("aegis");
 
 /// A maximal run of changed lines. Empty when start equals end.
 const Group = struct { start: i64, end: i64 };
@@ -114,13 +115,13 @@ pub fn compact(
                 end_matching_other = -1;
 
                 while (slideUp(f, ids, &g)) {
-                    assert(groupPrevious(other, &go));
+                    assert(groupPrevious(other, &go), "groupPrevious(other, &go)");
                 }
                 earliest_end = g.end;
                 if (go.end > go.start) end_matching_other = g.end;
 
                 while (slideDown(f, ids, &g)) {
-                    assert(groupNext(other, &go));
+                    assert(groupNext(other, &go), "groupNext(other, &go)");
                     if (go.end > go.start) end_matching_other = g.end;
                 }
 
@@ -135,8 +136,8 @@ pub fn compact(
                 // Back to meet a change on the other side, so a deletion and
                 // the insertion replacing it print as one hunk.
                 while (go.end == go.start) {
-                    assert(slideUp(f, ids, &g));
-                    assert(groupPrevious(other, &go));
+                    assert(slideUp(f, ids, &g), "slideUp(f, ids, &g)");
+                    assert(groupPrevious(other, &go), "groupPrevious(other, &go)");
                 }
             } else if (heuristic) {
                 var shift = earliest_end;
@@ -156,8 +157,8 @@ pub fn compact(
                 }
 
                 while (g.end > best_shift) {
-                    assert(slideUp(f, ids, &g));
-                    assert(groupPrevious(other, &go));
+                    assert(slideUp(f, ids, &g), "slideUp(f, ids, &g)");
+                    assert(groupPrevious(other, &go), "groupPrevious(other, &go)");
                 }
             }
 
@@ -183,7 +184,7 @@ pub fn compact(
         }
 
         if (!groupNext(f, &g)) break;
-        assert(groupNext(other, &go));
+        assert(groupNext(other, &go), "groupNext(other, &go)");
         // Unchanged lines on both sides are empty groups with nothing to
         // slide: step over them together, all but the last.
         if (g.end == g.start and go.end == go.start) {
@@ -197,7 +198,7 @@ pub fn compact(
         }
     }
 
-    assert(!groupNext(other, &go));
+    assert(!groupNext(other, &go), "!groupNext(other, &go)");
 }
 
 // Weights from git's xdiff, fitted to a corpus rather than reasoned out.

@@ -24,6 +24,7 @@ const Diff = @import("script.zig").Diff;
 const threeway = @import("threeway.zig");
 const class = @import("interner.zig");
 const refine_mod = @import("refine.zig");
+const aegis = @import("aegis");
 
 gpa: Allocator,
 /// Private: the algorithms' scratch.
@@ -265,8 +266,8 @@ pub fn sequences(d: *Differ, old_ids: []const class.ClassId, new_ids: []const cl
     if (@as(u64, old.len) + new.len > std.math.maxInt(u32)) return error.InputTooLarge;
     if (builtin.mode.runtimeSafety()) {
         const bound = class.ClassId.fromRaw(options.classes.raw());
-        for (old_ids) |id| std.debug.assert(id.compare(bound) == .lt);
-        for (new_ids) |id| std.debug.assert(id.compare(bound) == .lt);
+        for (old_ids) |id| aegis.assert.invariant(id.compare(bound) == .lt, "id.compare(bound) == .lt");
+        for (new_ids) |id| aegis.assert.invariant(id.compare(bound) == .lt, "id.compare(bound) == .lt");
     }
     if (std.mem.eql(u32, old, new)) return d.changes.items;
     const Source = core.SequenceSource(@TypeOf(context));
@@ -369,7 +370,7 @@ pub fn mergeSequences(d: *Differ, base_ids: []const class.ClassId, our_ids: []co
     if (@as(u64, base.len) + ours.len + theirs.len > std.math.maxInt(u32)) return error.InputTooLarge;
     if (builtin.mode.runtimeSafety()) {
         const bound = class.ClassId.fromRaw(options.classes.raw());
-        for ([_][]const class.ClassId{ base_ids, our_ids, their_ids }) |side| for (side) |id| std.debug.assert(id.compare(bound) == .lt);
+        for ([_][]const class.ClassId{ base_ids, our_ids, their_ids }) |side| for (side) |id| aegis.assert.invariant(id.compare(bound) == .lt, "id.compare(bound) == .lt");
     }
     const lens: [3]u32 = .{ @intCast(base.len), @intCast(ours.len), @intCast(theirs.len) };
     if (std.mem.eql(u32, ours, theirs)) {

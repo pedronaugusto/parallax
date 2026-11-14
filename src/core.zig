@@ -34,8 +34,8 @@ pub const Raised = enum(u8) { no, yes };
 pub const Stop = aegis.Atomic(Raised);
 const KernelWork = aegis.units.Count(Work.Domain, u64);
 comptime {
-    std.debug.assert(@sizeOf(Work) == @sizeOf(u32));
-    std.debug.assert(@sizeOf(KernelWork) == @sizeOf(u64));
+    aegis.assert.invariant(@sizeOf(Work) == @sizeOf(u32), "@sizeOf(Work) == @sizeOf(u32)");
+    aegis.assert.invariant(@sizeOf(KernelWork) == @sizeOf(u64), "@sizeOf(KernelWork) == @sizeOf(u64)");
 }
 
 /// What a diff can fail with: memory, or the caller's task canceled.

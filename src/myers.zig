@@ -15,12 +15,13 @@
 const std = @import("std");
 const core = @import("core.zig");
 const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
+const assert = aegis.assert.invariant;
 /// What a search can fail with: memory, or the caller's task canceled.
 pub const Error = Allocator.Error || std.Io.Cancelable;
 /// Change flags shared by the algorithm entry points.
 pub const Flags = @import("flags.zig").Flags;
 const fit = @import("fit.zig");
+const aegis = @import("aegis");
 
 /// Below this edit cost the search never gives up, however small the input.
 const max_cost_min: u64 = 256;
@@ -421,10 +422,10 @@ fn Search(comptime Int: type) type {
                     s.markB(off2, l2);
                     continue;
                 }
-                assert(off1 <= split.i1);
-                assert(split.i1 <= l1);
-                assert(off2 <= split.i2);
-                assert(split.i2 <= l2);
+                assert(off1 <= split.i1, "off1 <= split.i1");
+                assert(split.i1 <= l1, "split.i1 <= l1");
+                assert(off2 <= split.i2, "off2 <= split.i2");
+                assert(split.i2 <= l2, "split.i2 <= l2");
                 // The upper half goes on first, so the lower one is done
                 // first, as git's recursion does it.
                 try stack.append(gpa, .{ .off1 = split.i1, .lim1 = l1, .off2 = split.i2, .lim2 = l2, .need_min = split.min_hi });

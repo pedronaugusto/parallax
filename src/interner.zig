@@ -82,7 +82,7 @@ pub fn Interner(comptime T: type, comptime Context: type) type {
 
         /// The id of every item, into `out`, which is as long as `items`.
         pub fn internSlice(s: *Self, items: []const T, out: []ClassId) InternError!void {
-            std.debug.assert(items.len == out.len);
+            aegis.assert.invariant(items.len == out.len, "items.len == out.len");
             for (items, out) |item, *id| id.* = try s.intern(item);
         }
 

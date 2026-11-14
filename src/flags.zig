@@ -4,6 +4,7 @@
 //! past either end without a bounds test.
 
 const std = @import("std");
+const aegis = @import("aegis");
 
 // docs/design.md#numeric-boundaries; bounded sequence lengths and sentinel storage establish these raw kernel indexes.
 pub const Flags = struct {
@@ -13,7 +14,7 @@ pub const Flags = struct {
 
     /// A whole side over `storage`, which holds `n + 2` bytes, all clear.
     pub fn whole(storage: []u8, n: u32) Flags {
-        std.debug.assert(storage.len == @as(usize, n) + 2);
+        aegis.assert.invariant(storage.len == @as(usize, n) + 2, "storage.len == @as(usize, n) + 2");
         @memset(storage, 0);
         return .{ .bytes = storage.ptr, .len = n };
     }

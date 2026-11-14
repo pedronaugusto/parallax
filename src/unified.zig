@@ -100,7 +100,7 @@ pub fn writeUnified(w: *Io.Writer, diff: Diff, options: UnifiedOptions, context:
         // Two ranges of two 32-bit numbers and their punctuation.
         var buf: [64]u8 = undefined;
         var header: Io.Writer = .fixed(&buf);
-        // unreachable: the buffer holds the widest ranges
+        // glint-ignore: Z026 -- the buffer holds the widest ranges
         writeRanges(&header, hunk.old_start, hunk.old_len, hunk.new_start, hunk.new_len) catch unreachable;
         try emit(context, w, .{ .kind = .hunk, .text = header.buffered(), .heading = heading_text });
 

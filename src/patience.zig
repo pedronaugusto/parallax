@@ -11,12 +11,13 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
+const assert = aegis.assert.invariant;
 /// Change flags shared by the algorithm entry points.
 pub const Flags = @import("flags.zig").Flags;
 const myers = @import("myers.zig");
 const histogram = @import("histogram.zig");
 const fit = @import("fit.zig");
+const aegis = @import("aegis");
 
 // docs/design.md#numeric-boundaries; anchors/backbone use bounded line indexes inside the validated raw kernel.
 pub const Buffers = struct {
@@ -198,7 +199,7 @@ fn State(comptime Anchor: type) type {
                 if (cursor == no_slot) break;
             }
             // The chain from the top pile back is one slot per pile.
-            assert(n == 0);
+            assert(n == 0, "n == 0");
             return out;
         }
 
