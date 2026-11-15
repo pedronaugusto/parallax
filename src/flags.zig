@@ -6,17 +6,17 @@
 const std = @import("std");
 const aegis = @import("aegis");
 
-// docs/design.md#numeric-boundaries; bounded sequence lengths and sentinel storage establish these raw kernel indexes.
 pub const Flags = struct {
-    /// Private: byte `i + 1` is line i's flag.
-    bytes: [*]u8,
+    /// Private: byte `i + 1` is line i's flag; a sentinel each side, `len + 2`
+    /// bytes in all.
+    bytes: []u8,
     len: u32,
 
     /// A whole side over `storage`, which holds `n + 2` bytes, all clear.
     pub fn whole(storage: []u8, n: u32) Flags {
         aegis.assert.invariant(storage.len == @as(usize, n) + 2, "storage.len == @as(usize, n) + 2");
         @memset(storage, 0);
-        return .{ .bytes = storage.ptr, .len = n };
+        return .{ .bytes = storage, .len = n };
     }
 
     /// Line i's flag; i may be -1 or `len` on a whole side.
@@ -31,7 +31,7 @@ pub const Flags = struct {
     /// Lines `start .. start + n` as flags of their own. Only a whole side
     /// has sentinels.
     pub fn sub(f: Flags, start: u32, n: u32) Flags {
-        return .{ .bytes = f.bytes + start, .len = n };
+        return .{ .bytes = f.bytes[start..][0 .. @as(usize, n) + 2], .len = n };
     }
 
     pub fn clear(f: Flags) void {

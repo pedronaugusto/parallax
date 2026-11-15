@@ -8,6 +8,10 @@ test "every algorithm, comparison and cap gives a script that applies" {
     try shakedown.check(std.testing.allocator, {}, support.diffOne, .{ .seed = 0x64696666, .cases = 3000 });
 }
 
+test "minimal Myers adds and removes what a longest common subsequence leaves" {
+    try shakedown.check(std.testing.allocator, {}, support.minimalOne, .{ .seed = 0x6d696e69, .cases = 3000 });
+}
+
 test "lines of one form match, symmetrically" {
     try shakedown.check(std.testing.allocator, {}, support.sameLineOne, .{ .seed = 0x6c696e65, .cases = 3000 });
 }

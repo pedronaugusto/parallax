@@ -39,7 +39,7 @@ const Git = struct {
             else => {},
         }
         g.gpa.free(result.stdout);
-        say(g.io, "git {s}: {s}\n", .{ args[0], result.stderr });
+        try say(g.io, "git {s}: {s}\n", .{ args[0], result.stderr });
         return error.GitFailed;
     }
 };
@@ -63,11 +63,10 @@ const Blobs = struct {
         b.out = b.child.stdout.?.readerStreaming(g.io, &b.out_buffer);
     }
 
+    /// Ends the batch process: every blob the run asks for is read by the
+    /// time it stops, so nothing the process would still say is wanted.
     fn stop(b: *Blobs, io: Io) void {
-        b.child.stdin.?.close(io);
-        b.child.stdin = null;
-        // glint-ignore: Z026 -- teardown of a bench helper whose stdin is closed; a wait that fails leaves a child the run ends with anyway
-        _ = b.child.wait(io) catch {};
+        b.child.kill(io);
     }
 
     /// The blob `oid`, into `out`.
@@ -225,7 +224,7 @@ fn collect(init: std.process.Init, args: []const []const u8) !void {
         pairs.count += 1;
     }
     const pairs_hash = try pairs.close(io);
-    say(io, "{d} pairs from {d} commits, {d} MB\n", .{ pairs.count, commits, pairs.bytes / 1_000_000 });
+    try say(io, "{d} pairs from {d} commits, {d} MB\n", .{ pairs.count, commits, pairs.bytes / 1_000_000 });
 
     // The merges: files both parents changed from their merge base.
     const merges_list = try git.run(&.{ "rev-list", "--merges", "--reverse", "--parents", range });
@@ -272,7 +271,7 @@ fn collect(init: std.process.Init, args: []const []const u8) !void {
         }
     }
     const merges_hash = try merges.close(io);
-    say(io, "{d} triples from {d} merges, {d} MB\n", .{ merges.count, merge_commits, merges.bytes / 1_000_000 });
+    try say(io, "{d} triples from {d} merges, {d} MB\n", .{ merges.count, merge_commits, merges.bytes / 1_000_000 });
 
     const manifest = try arena.print(
         \\parallax bench corpus 1
@@ -297,17 +296,17 @@ fn collect(init: std.process.Init, args: []const []const u8) !void {
     }
     const expected = try aegis.own.readFile(io, Io.Dir.cwd(), committed, arena, .literal("1MiB"));
     if (!std.mem.eql(u8, expected, manifest)) {
-        say(io, "the corpus differs from {s}:\n{s}", .{ committed, manifest });
+        try say(io, "the corpus differs from {s}:\n{s}", .{ committed, manifest });
         return error.ManifestMismatch;
     }
 }
 
 /// A line on stderr.
-fn say(io: Io, comptime format: []const u8, args: anytype) void {
+fn say(io: Io, comptime format: []const u8, args: anytype) Io.Writer.Error!void {
     var buffer: [512]u8 = undefined;
     var stderr = Io.File.stderr().writerStreaming(io, &buffer);
-    stderr.interface.print(format, args) catch return;
-    stderr.interface.flush() catch return;
+    try stderr.interface.print(format, args);
+    try stderr.interface.flush();
 }
 
 fn nextRaw(it: *std.mem.SplitIterator(u8, .scalar)) ?Raw {

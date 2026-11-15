@@ -62,7 +62,9 @@ pub const Form = struct {
     mode: Mode,
     lower: bool,
 
-    const Mode = enum { verbatim, all, change };
+    /// How a line's text compares: as written, with all whitespace left
+    /// out, or with changes in its amount ignored.
+    pub const Mode = enum { verbatim, all, change };
 
     pub fn init(line: []const u8, compare: Compare) Form {
         const ws = compare.whitespace;

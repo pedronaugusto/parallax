@@ -36,6 +36,5 @@ pub fn bytes(list: anytype) Bytes {
 
 /// Sum of disjoint live storage, already bounded by the address space.
 pub fn add(a: Bytes, b: Bytes) Bytes {
-    // docs/design.md#numeric-boundaries; disjoint live allocations cannot exceed the address space; both operands are byte counts.
-    return .fromRaw(a.raw() + b.raw());
+    return a.add(b) catch aegis.assert.never("disjoint live allocations cannot exceed the address space");
 }

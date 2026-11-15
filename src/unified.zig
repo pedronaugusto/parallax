@@ -97,12 +97,9 @@ pub fn writeUnified(w: *Io.Writer, diff: Diff, options: UnifiedOptions, context:
             previous_start = from;
             if (last_found) |text| heading_text = text;
         }
-        // Two ranges of two 32-bit numbers and their punctuation.
-        var buf: [64]u8 = undefined;
-        var header: Io.Writer = .fixed(&buf);
-        // glint-ignore: Z026 -- the buffer holds the widest ranges
-        writeRanges(&header, hunk.old_start, hunk.old_len, hunk.new_start, hunk.new_len) catch unreachable;
-        try emit(context, w, .{ .kind = .hunk, .text = header.buffered(), .heading = heading_text });
+        var header: Ranges = .{};
+        header.ranges(hunk.old_start, hunk.old_len, hunk.new_start, hunk.new_len);
+        try emit(context, w, .{ .kind = .hunk, .text = header.text(), .heading = heading_text });
 
         // The context before the first change is the new side's, counted
         // there, as git prints it; between changes both sides step.
@@ -157,21 +154,48 @@ fn emit(context: anytype, w: *Io.Writer, line: UnifiedLine) WriteError(@TypeOf(c
 }
 
 /// `@@ -<old> +<new> @@`.
-fn writeRanges(w: *Io.Writer, old_start: u32, old_len: u32, new_start: u32, new_len: u32) Io.Writer.Error!void {
-    try w.writeAll("@@ -");
-    try writeRange(w, old_start, old_len);
-    try w.writeAll(" +");
-    try writeRange(w, new_start, new_len);
-    try w.writeAll(" @@");
-}
+/// A hunk's header line, `@@ -old +new @@`, held in place: two ranges of
+/// two 32-bit numbers and their punctuation fit its buffer, so writing it
+/// cannot fail.
+const Ranges = struct {
+    buf: [64]u8 = undefined,
+    len: usize = 0,
 
-/// An empty range is printed at the line before it, and with no count when
-/// the count is one.
-fn writeRange(w: *Io.Writer, start: u32, count: u32) Io.Writer.Error!void {
-    if (count == 0) return w.print("{d},0", .{start});
-    if (count == 1) return w.print("{d}", .{@as(u64, start) + 1});
-    try w.print("{d},{d}", .{ @as(u64, start) + 1, count });
-}
+    fn ranges(r: *Ranges, old_start: u32, old_len: u32, new_start: u32, new_len: u32) void {
+        r.put("@@ -");
+        r.range(old_start, old_len);
+        r.put(" +");
+        r.range(new_start, new_len);
+        r.put(" @@");
+    }
+
+    /// An empty range is printed at the line before it, and with no count
+    /// when the count is one.
+    fn range(r: *Ranges, start: u32, count: u32) void {
+        if (count == 0) {
+            r.number(start);
+            r.put(",0");
+        } else {
+            r.number(@as(u64, start) + 1);
+            if (count == 1) return;
+            r.put(",");
+            r.number(count);
+        }
+    }
+
+    fn put(r: *Ranges, bytes: []const u8) void {
+        @memcpy(r.buf[r.len..][0..bytes.len], bytes);
+        r.len += bytes.len;
+    }
+
+    fn number(r: *Ranges, value: u64) void {
+        r.len += std.fmt.printInt(r.buf[r.len..], value, 10, .lower, .{});
+    }
+
+    fn text(r: *const Ranges) []const u8 {
+        return r.buf[0..r.len];
+    }
+};
 
 fn writeContext(context: anytype, w: *Io.Writer, options: UnifiedOptions, line: []const u8, number: u32) WriteError(@TypeOf(context))!void {
     const sign: u8 = if (options.suppress_blank_empty and std.mem.eql(u8, line, "\n")) 0 else ' ';

@@ -151,6 +151,48 @@ pub fn diffOne(_: void, case: *shakedown.Case) !void {
     }
 }
 
+/// One random pair under minimal Myers and any comparison: the script adds
+/// and removes exactly the lines a longest common subsequence leaves, the
+/// model being the textbook table over the same comparison. The texts are
+/// short and draw from few lines, so lines repeat past the count at which
+/// a heuristic search sets common lines aside.
+pub fn minimalOne(_: void, case: *shakedown.Case) !void {
+    const s = case.source;
+    var a_buf: [256]u8 = undefined;
+    var b_buf: [320]u8 = undefined;
+    const old = try drawText(case, &a_buf);
+    const new = if (gen.weighted(s, &.{ 2, 1 }) == 1) try drawText(case, &b_buf) else drawEdit(case, old, &b_buf);
+    var o = options(s);
+    o.algorithm = .myers;
+    o.minimal = true;
+    o.max_work = .fromRaw(0);
+    o.anchors = &.{};
+    var d: parallax.Differ = .init(std.testing.allocator);
+    defer d.deinit();
+    const diff = try d.lines(old, new, o);
+    try expectApplies(diff);
+    const n = diff.old.len();
+    const m = diff.new.len();
+    // The row above and the row being filled, each m + 1 cells.
+    var rows: [2][322]u32 = undefined;
+    @memset(&rows[0], 0);
+    for (1..@as(usize, n) + 1) |i| {
+        const above = &rows[(i - 1) & 1];
+        const row = &rows[i & 1];
+        row[0] = 0;
+        for (1..@as(usize, m) + 1) |j| {
+            row[j] = if (compare.sameForm(diff.old.get(@intCast(i - 1)), diff.new.get(@intCast(j - 1)), diff.compare))
+                above[j - 1] + 1
+            else
+                @max(above[j], row[j - 1]);
+        }
+    }
+    const common = rows[n & 1][m];
+    const st = diff.stat();
+    try std.testing.expectEqual(n - common, st.removed);
+    try std.testing.expectEqual(m - common, st.added);
+}
+
 /// The hunks of `diff` are in bounds, ascend, hold their changes, and cover
 /// every change at most once (with no ignorable change, exactly once);
 /// without whole functions they never overlap.
