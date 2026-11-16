@@ -276,6 +276,19 @@ test "merges are what git merge-file and merge-tree write, in every style, level
     try std.testing.expectEqual(@as(usize, 3015), count);
 }
 
+test "a side that changes only whitespace the comparison ignores has no change, so the merge is the other side's text" {
+    const gpa = std.testing.allocator;
+    const b: parallax.Compare = .{ .whitespace = .{ .change = true } };
+    // git merge -Xignore-space-change writes theirs where both sides change only spaces.
+    var both = try parallax.merge.mergeAlloc(gpa, "\na \n\nz\n", "\na\n\nz\n", "\na  \n\nz\n", .{ .compare = b }, .{});
+    defer both.deinit();
+    try std.testing.expectEqualStrings("\na  \n\nz\n", both.bytes);
+    // And so an unchanged theirs gives the base where ours changes only spaces.
+    var unchanged = try parallax.merge.mergeAlloc(gpa, "\na \n\n", "\na\n\n", "\na \n\n", .{ .compare = b }, .{});
+    defer unchanged.deinit();
+    try std.testing.expectEqualStrings("\na \n\n", unchanged.bytes);
+}
+
 /// Our lines' content as git's line merge reads it: a letter or digit.
 const LineContent = struct {
     ours: parallax.Lines,

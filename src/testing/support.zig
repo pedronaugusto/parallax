@@ -350,12 +350,17 @@ pub fn mergeOne(_: void, case: *shakedown.Case) !void {
     // The same merge over interned lines gives the same regions.
     if (o.compare.exact()) try expectSequenceMerge(&d, m, o);
 
-    // A side with no change gives the other side.
+    // A side with no change gives the other side, as git's: a side that
+    // changes nothing the comparison sees (whitespace it ignores) has no
+    // change, so ours over an unchanged theirs is ours only where ours
+    // changes something, else theirs whole.
+    var ours_changes = try parallax.diffLines(gpa, base, ours, .{ .compare = o.compare });
+    defer ours_changes.deinit();
     const kept = try d.merge(base, ours, base, o);
     var out: std.Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
     try parallax.merge.write(&out.writer, kept, .{});
-    try std.testing.expectEqualStrings(ours, out.written());
+    try std.testing.expectEqualStrings(if (ours_changes.diff.changes.len == 0) base else ours, out.written());
     try std.testing.expectEqual(@as(u32, 0), kept.conflicts);
     const taken = try d.merge(base, base, theirs, o);
     out.clearRetainingCapacity();

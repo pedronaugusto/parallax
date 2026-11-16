@@ -273,5 +273,12 @@ test "fuzz: lines of one comparison form always match, and matching is symmetric
 }
 
 test "fuzz: three-way merges never crash and an unchanged theirs keeps ours" {
-    try shakedown.check(std.testing.allocator, {}, support.mergeOne, .{ .seed = 0x6d657267, .cases = 1 });
+    try shakedown.check(std.testing.allocator, {}, support.mergeOne, .{
+        .seed = 0x6d657267,
+        .cases = 1,
+        .regressions = &.{
+            // ours changes only whitespace that -b ignores and theirs is the base: the merge is theirs whole, as git's
+            "a2c2:0:0:0:0:a2c2:2:0:3:0:a2c2:0:0:0:0:0:0:0:6:2:0:0:0:0:0:0:4",
+        },
+    });
 }
