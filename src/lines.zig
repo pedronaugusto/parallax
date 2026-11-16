@@ -79,25 +79,22 @@ fn splitBlocks(gpa: Allocator, ends: *std.ArrayList(u32), text: []const u8) Allo
 
 test "the block and scalar line splits agree" {
     const gpa = std.testing.allocator;
-    var a: std.ArrayList(u32) = .empty;
-    defer a.deinit(gpa);
-    var b: std.ArrayList(u32) = .empty;
-    defer b.deinit(gpa);
-    const Buffers = struct { a: *std.ArrayList(u32), b: *std.ArrayList(u32) };
-    const buffers: Buffers = .{ .a = &a, .b = &b };
-    try shakedown.check(gpa, buffers, struct {
-        fn run(ctx: Buffers, case: *shakedown.Case) !void {
+    try shakedown.check(gpa, {}, struct {
+        fn run(_: void, case: *shakedown.Case) !void {
+            // Each case's own lists: the fuzzer checks the allocator after every input.
+            var a: std.ArrayList(u32) = .empty;
+            defer a.deinit(std.testing.allocator);
+            var b: std.ArrayList(u32) = .empty;
+            defer b.deinit(std.testing.allocator);
             const gen = shakedown.gen;
             const source = case.source;
             var text: [700]u8 = undefined;
             const n = gen.intRange(source, usize, 0, text.len);
             const odds = gen.intRange(source, u8, 1, 80);
             for (text[0..n]) |*c| c.* = if (gen.weighted(source, &.{ 1, odds - 1 }) == 0) '\n' else 'x';
-            ctx.a.clearRetainingCapacity();
-            ctx.b.clearRetainingCapacity();
-            try split(std.testing.allocator, ctx.a, text[0..n]);
-            try splitScalar(std.testing.allocator, ctx.b, text[0..n], 0);
-            try std.testing.expectEqualSlices(u32, ctx.b.items, ctx.a.items);
+            try split(std.testing.allocator, &a, text[0..n]);
+            try splitScalar(std.testing.allocator, &b, text[0..n], 0);
+            try std.testing.expectEqualSlices(u32, b.items, a.items);
         }
     }.run, .{ .seed = 0x73706c69, .cases = 500 });
 }

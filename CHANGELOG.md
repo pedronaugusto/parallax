@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Development on preflight's ci-standard 158c176, shakedown c29751d (its simulation builds for 32-bit targets, which x86-linux-musl's cross compile reads) and reactor 2d72792. The line split property keeps each case's lists to that case, as the fuzzer checks the allocator after every input.
 - Pins aegis f52eabe, still 0.2.4, the one aegis the family builds on: the kernels read the interned ids as their `u32`s through `ClassId.raws`, where parallax cast the slice itself. Development on preflight's ci-standard f991816 and shakedown 327bc61, with reactor 60e8f45 for the tests.
 - Pins aegis c8982a8, still 0.2.4: six additive commits after 3c0b13e (the role declarations a linter reads, `lint_rules`), the aegis the development build's preflight selects. Nothing parallax calls changed.
 - On aegis 0.2.3 (the aegis 0.2 line), developed with preflight 0.18.4. The interner's slot holds an optional class where it held the class plus one, zero for empty.
