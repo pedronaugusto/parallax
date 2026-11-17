@@ -1,10 +1,8 @@
 //! parallax's own workloads, timed: `zig build bench [-- --smoke] [-- --json]
 //! [-- --runs N] [-- --only W1,W5] [-- --corpus DIR]`.
 //!
-//! Each workload runs on parallax with one reused `Differ`, and, as the A/B
-//! baseline, on the code parallax replaces (`baseline/`, relic's line diff
-//! and blob merge copied verbatim at relic e090bde). The A/B column is the
-//! baseline's time over parallax's: above 1 is parallax faster.
+//! Each workload runs on parallax with one reused `Differ`. Comparisons with
+//! other differs are trials' (`parallax/` there), not this program's.
 //!
 //! - W1: 1M lines, ten edits; W2: 1M lines, 10% and 50% edited;
 //! - W3a-W3f: the adversarial shapes; W2 and W3b again with a stop flag
@@ -33,8 +31,6 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const parallax = @import("parallax");
 const gen = @import("gen.zig");
-const textdiff = @import("baseline/diff/textdiff.zig");
-const blobmerge = @import("baseline/merge/blobmerge.zig");
 
 const Report = struct {
     w: *Io.Writer,
@@ -146,13 +142,13 @@ pub fn main(init: std.process.Init) !void {
     if (config.wants("W1")) {
         const p = try gen.w1(gpa, large);
         defer p.deinit(gpa);
-        try pair(r, gpa, &d, config, "W1", p, &.{ .myers, .histogram, .patience });
+        try pair(r, &d, config, "W1", p, &.{ .myers, .histogram, .patience });
     }
     if (config.wants("W2")) {
         for ([_]f64{ 0.1, 0.5 }, [_][]const u8{ "W2 10%", "W2 50%" }) |fraction, name| {
             const p = try gen.w2(gpa, large, fraction);
             defer p.deinit(gpa);
-            try pair(r, gpa, &d, config, name, p, &.{ .myers, .histogram, .patience });
+            try pair(r, &d, config, name, p, &.{ .myers, .histogram, .patience });
         }
     }
     if (config.wants("W3")) {
@@ -165,7 +161,7 @@ pub fn main(init: std.process.Init) !void {
             .{ .name = "W3f", .pair = try gen.w3f(gpa, config.scale(10_000_000)) },
         };
         defer for (shapes) |s| s.pair.deinit(gpa);
-        for (shapes) |s| try pair(r, gpa, &d, config, s.name, s.pair, &.{ .myers, .histogram });
+        for (shapes) |s| try pair(r, &d, config, s.name, s.pair, &.{ .myers, .histogram });
         try stopRows(r, gpa, &d, config, large, shapes[1].pair);
     }
     if (config.corpus) |dir| {
@@ -222,28 +218,17 @@ fn functions(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !vo
     }
 }
 
-/// One pair under each algorithm, parallax then the baseline.
-fn pair(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, name: []const u8, p: gen.Pair, algorithms: []const parallax.Algorithm) !void {
+/// One pair under each algorithm.
+fn pair(r: Report, d: *parallax.Differ, config: Config, name: []const u8, p: gen.Pair, algorithms: []const parallax.Algorithm) !void {
     const mb = @as(f64, @floatFromInt(p.old.len + p.new.len)) / 1e6;
     for (algorithms) |algorithm| {
         const ours = try timeLines(r, d, config, p, .{ .algorithm = algorithm });
-        const base = try timeBaseline(r, gpa, config, p, .{ .algorithm = baselineAlgorithm(algorithm) });
         var label_buf: [64]u8 = undefined;
         const label = try std.mem.print(&label_buf, "{t}", .{algorithm});
         try r.line(name, label, "parallax", ours / 1e6, "ms");
-        try r.line(name, label, "baseline", base / 1e6, "ms");
         try r.line(name, label, "throughput", mb / (ours / 1e9), "MB/s");
-        try r.line(name, label, "A/B", base / ours, "x");
         try r.line(name, label, "work", @floatFromInt(d.work), "units");
     }
-}
-
-fn baselineAlgorithm(a: parallax.Algorithm) textdiff.Algorithm {
-    return switch (a) {
-        .myers => .myers,
-        .histogram => .histogram,
-        .patience => .patience,
-    };
 }
 
 fn timeLines(r: Report, d: *parallax.Differ, config: Config, p: gen.Pair, options: parallax.Options) !f64 {
@@ -252,23 +237,6 @@ fn timeLines(r: Report, d: *parallax.Differ, config: Config, p: gen.Pair, option
         const t0 = r.now();
         const diff = try d.lines(p.old, p.new, options);
         std.mem.doNotOptimizeAway(diff.changes.len);
-        const t1 = r.now();
-        if (run != 0) best = @min(best, ns(t0, t1));
-    }
-    return best;
-}
-
-fn timeBaseline(r: Report, gpa: Allocator, config: Config, p: gen.Pair, options: textdiff.Options) !f64 {
-    var best: f64 = std.math.inf(f64);
-    for (0..config.runs + 1) |run| {
-        const t0 = r.now();
-        const old = try textdiff.splitLines(gpa, p.old);
-        defer gpa.free(old);
-        const new = try textdiff.splitLines(gpa, p.new);
-        defer gpa.free(new);
-        const changes = try textdiff.diffLines(gpa, old, new, options);
-        defer gpa.free(changes);
-        std.mem.doNotOptimizeAway(changes.len);
         const t1 = r.now();
         if (run != 0) best = @min(best, ns(t0, t1));
     }
@@ -305,23 +273,6 @@ fn small(r: Report, gpa: Allocator, config: Config) !void {
     try r.line("W5", "parallax", "p50", percentile(times, 0.5) / 1e3, "us");
     try r.line("W5", "parallax", "p99", percentile(times, 0.99) / 1e3, "us");
     try r.line("W5", "parallax", "allocations", @as(f64, @floatFromInt(calls)) / @as(f64, @floatFromInt(pairs.len)), "per call");
-
-    var base_counting: Counting = .{ .inner = gpa };
-    const b = base_counting.allocator();
-    for (pairs, times) |p, *t| {
-        const t0 = r.now();
-        const old = try textdiff.splitLines(b, p.old);
-        defer b.free(old);
-        const new = try textdiff.splitLines(b, p.new);
-        defer b.free(new);
-        const changes = try textdiff.diffLines(b, old, new, .{});
-        defer b.free(changes);
-        t.* = ns(t0, r.now());
-    }
-    std.mem.sort(f64, times, {}, std.sort.asc(f64));
-    try r.line("W5", "baseline", "p50", percentile(times, 0.5) / 1e3, "us");
-    try r.line("W5", "baseline", "p99", percentile(times, 0.99) / 1e3, "us");
-    try r.line("W5", "baseline", "allocations", @as(f64, @floatFromInt(base_counting.calls)) / @as(f64, @floatFromInt(pairs.len)), "per call");
 }
 
 /// W6: the normalising hash path.
@@ -341,14 +292,7 @@ fn whitespace(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, li
     for (cases) |c| {
         const q: gen.Pair = .{ .old = c.old, .new = c.new };
         const ours = try timeLines(r, d, config, q, .{ .compare = .{ .whitespace = c.ws } });
-        const base = try timeBaseline(r, gpa, config, q, .{
-            .ignore_all_whitespace = c.ws.all,
-            .ignore_whitespace_change = c.ws.change,
-            .ignore_cr_at_eol = c.ws.cr_at_eol,
-        });
         try r.line("W6", c.name, "parallax", ours / 1e6, "ms");
-        try r.line("W6", c.name, "baseline", base / 1e6, "ms");
-        try r.line("W6", c.name, "A/B", base / ours, "x");
     }
 }
 
@@ -396,8 +340,7 @@ fn refineInline(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config, 
     };
 }
 
-/// W7: merges, parallax writing into a discarding writer, against the
-/// baseline's blob merge.
+/// W7: merges, parallax writing into a discarding writer.
 fn merges(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void {
     const triples = [_]struct { name: []const u8, t: gen.Triple }{
         .{ .name = "W7b", .t = try gen.w7b(gpa, config.scale(100_000)) },
@@ -418,26 +361,9 @@ fn merges(r: Report, gpa: Allocator, d: *parallax.Differ, config: Config) !void 
                 const t1 = r.now();
                 if (run != 0) best = @min(best, ns(t0, t1));
             }
-            var base_best: f64 = std.math.inf(f64);
-            for (0..config.runs + 1) |run| {
-                const t0 = r.now();
-                var result = try blobmerge.blobs(gpa, t.base, t.ours, t.theirs, .{
-                    .conflict_style = switch (style) {
-                        .merge => .merge,
-                        .diff3 => .diff3,
-                        .zdiff3 => .zdiff3,
-                    },
-                    .algorithm = .histogram,
-                });
-                result.deinit();
-                const t1 = r.now();
-                if (run != 0) base_best = @min(base_best, ns(t0, t1));
-            }
             var label_buf: [32]u8 = undefined;
             const label = try std.mem.print(&label_buf, "{t}", .{style});
             try r.line(case.name, label, "parallax", best / 1e6, "ms");
-            try r.line(case.name, label, "baseline", base_best / 1e6, "ms");
-            try r.line(case.name, label, "A/B", base_best / best, "x");
         }
     }
     try mergeExtras(r, gpa, d, config, triples[0].t);
@@ -636,8 +562,8 @@ fn checkCorpus(gpa: Allocator, io: Io, dir: []const u8) !void {
 const large_file = 1 << 20;
 
 /// W4 and W4L: every changed file of the real history, diffed by parallax
-/// (one workspace) and by the baseline, per-file latency from the best of
-/// the runs, and allocations per call once warm.
+/// (one workspace), per-file latency from the best of the runs, and
+/// allocations per call once warm.
 fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !void {
     try checkCorpus(gpa, io, dir);
     var fields: [2]std.ArrayList(u8) = .{ .empty, .empty };
@@ -651,7 +577,6 @@ fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !voi
         var d: parallax.Differ = .init(counting.allocator());
         defer d.deinit();
         var best: [2]f64 = .{ std.math.inf(f64), std.math.inf(f64) };
-        var base_best: [2]f64 = .{ std.math.inf(f64), std.math.inf(f64) };
         var bytes: [2]u64 = .{ 0, 0 };
         var calls_warm: usize = 0;
         var count: usize = 0;
@@ -659,7 +584,6 @@ fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !voi
             try records.open(io, dir, "pairs");
             defer records.close(io);
             var total: [2]f64 = .{ 0, 0 };
-            var base_total: [2]f64 = .{ 0, 0 };
             const calls_before = counting.calls;
             var at: usize = 0;
             while (try records.next(gpa, &fields)) : (at += 1) {
@@ -675,35 +599,19 @@ fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !voi
                 const diff = try d.lines(old, new, .{ .algorithm = algorithm });
                 std.mem.doNotOptimizeAway(diff.changes.len);
                 const t1 = r.now();
-                const old_lines = try textdiff.splitLines(gpa, old);
-                defer gpa.free(old_lines);
-                const new_lines = try textdiff.splitLines(gpa, new);
-                defer gpa.free(new_lines);
-                const changes = try textdiff.diffLines(gpa, old_lines, new_lines, .{ .algorithm = baselineAlgorithm(algorithm) });
-                gpa.free(changes);
-                const t2 = r.now();
                 times.items[at] = @min(times.items[at], ns(t0, t1));
                 total[0] += ns(t0, t1);
-                base_total[0] += ns(t1, t2);
-                if (big) {
-                    total[1] += ns(t0, t1);
-                    base_total[1] += ns(t1, t2);
-                }
+                if (big) total[1] += ns(t0, t1);
             }
             count = at;
             if (run == 0) continue;
             if (run == 1) calls_warm = counting.calls - calls_before;
-            for (0..2) |k| {
-                best[k] = @min(best[k], total[k]);
-                base_best[k] = @min(base_best[k], base_total[k]);
-            }
+            for (0..2) |k| best[k] = @min(best[k], total[k]);
         }
         var label_buf: [32]u8 = undefined;
         const label = try std.mem.print(&label_buf, "{t}", .{algorithm});
         for ([_][]const u8{ "W4", "W4L" }, 0..) |name, k| {
             try r.line(name, label, "parallax", best[k] / 1e6, "ms");
-            try r.line(name, label, "baseline", base_best[k] / 1e6, "ms");
-            try r.line(name, label, "A/B", base_best[k] / best[k], "x");
             try r.line(name, label, "throughput", @as(f64, @floatFromInt(bytes[k])) / 1e6 / (best[k] / 1e9), "MB/s");
         }
         try r.line("W4", label, "files", @floatFromInt(count), "");
@@ -718,7 +626,7 @@ fn real(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !voi
 
 /// W7a: the merges of the real history's merge commits, as git's merge
 /// machinery takes them (histogram, zealous) and as `git merge-file` does
-/// (Myers, zealous-alnum), each written, against the baseline.
+/// (Myers, zealous-alnum), each written.
 fn realMerges(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8) !void {
     try checkCorpus(gpa, io, dir);
     var fields: [3]std.ArrayList(u8) = .{ .empty, .empty, .empty };
@@ -727,20 +635,18 @@ fn realMerges(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8
     defer gpa.destroy(records);
     var d: parallax.Differ = .init(gpa);
     defer d.deinit();
-    const cases = [_]struct { []const u8, parallax.merge.Options, textdiff.Algorithm }{
-        .{ "histogram zealous", .{ .algorithm = .histogram, .level = .zealous }, .histogram },
-        .{ "myers zealous-alnum", .{}, .myers },
+    const cases = [_]struct { []const u8, parallax.merge.Options }{
+        .{ "histogram zealous", .{ .algorithm = .histogram, .level = .zealous } },
+        .{ "myers zealous-alnum", .{} },
     };
     for (cases) |case| {
         var best: f64 = std.math.inf(f64);
-        var base_best: f64 = std.math.inf(f64);
         var conflicts: usize = 0;
         var count: usize = 0;
         for (0..config.runs + 1) |run| {
             try records.open(io, dir, "merges");
             defer records.close(io);
             var total: f64 = 0;
-            var base_total: f64 = 0;
             conflicts = 0;
             count = 0;
             var discard_buffer: [1 << 14]u8 = undefined;
@@ -750,23 +656,13 @@ fn realMerges(r: Report, gpa: Allocator, io: Io, config: Config, dir: []const u8
                 const m = try d.merge(fields[0].items, fields[1].items, fields[2].items, case[1]);
                 try parallax.merge.write(&discard.writer, m, .{});
                 const t1 = r.now();
-                var result = try blobmerge.blobs(gpa, fields[0].items, fields[1].items, fields[2].items, .{
-                    .algorithm = case[2],
-                    .join_without_alnum = case[1].level == .zealous_alnum,
-                });
-                result.deinit();
-                const t2 = r.now();
                 total += ns(t0, t1);
-                base_total += ns(t1, t2);
                 conflicts += m.conflicts;
             }
             if (run == 0) continue;
             best = @min(best, total);
-            base_best = @min(base_best, base_total);
         }
         try r.line("W7a", case[0], "parallax", best / 1e6, "ms");
-        try r.line("W7a", case[0], "baseline", base_best / 1e6, "ms");
-        try r.line("W7a", case[0], "A/B", base_best / best, "x");
         try r.line("W7a", case[0], "merges", @floatFromInt(count), "files");
         try r.line("W7a", case[0], "conflicts", @floatFromInt(conflicts), "");
     }

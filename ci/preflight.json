@@ -3,8 +3,7 @@
     "src"
   ],
   "test_roots": [
-    "src/tests.zig",
-    "bench/baseline/diff/textdiff.zig"
+    "src/tests.zig"
   ],
   "test_support": [
     "src/testing/**"
