@@ -280,11 +280,11 @@ test "a side that changes only whitespace the comparison ignores has no change, 
     const gpa = std.testing.allocator;
     const b: parallax.Compare = .{ .whitespace = .{ .change = true } };
     // git merge -Xignore-space-change writes theirs where both sides change only spaces.
-    var both = try parallax.merge.mergeAlloc(gpa, "\na \n\nz\n", "\na\n\nz\n", "\na  \n\nz\n", .{ .compare = b }, .{});
+    var both = try parallax.merge.mergeAlloc(gpa, "\na \n\nz\n", "\na\n\nz\n", "\na  \n\nz\n", .{ .merge = .{ .compare = b } });
     defer both.deinit();
     try std.testing.expectEqualStrings("\na  \n\nz\n", both.bytes);
     // And so an unchanged theirs gives the base where ours changes only spaces.
-    var unchanged = try parallax.merge.mergeAlloc(gpa, "\na \n\n", "\na\n\n", "\na \n\n", .{ .compare = b }, .{});
+    var unchanged = try parallax.merge.mergeAlloc(gpa, "\na \n\n", "\na\n\n", "\na \n\n", .{ .merge = .{ .compare = b } });
     defer unchanged.deinit();
     try std.testing.expectEqualStrings("\na \n\n", unchanged.bytes);
 }
@@ -421,7 +421,7 @@ test "conflict markers read back as git's rerere reads them" {
 
 test "a marker alone on its line is read too, as write writes it for an empty label" {
     const gpa = std.testing.allocator;
-    var m = try parallax.merge.mergeAlloc(gpa, "a\r\nb\r\nc\r\n", "a\r\nB\r\nc\r\n", "a\r\nX\r\nc\r\n", .{ .style = .diff3 }, .{ .labels = .{ .ours = "", .base = "", .theirs = "" } });
+    var m = try parallax.merge.mergeAlloc(gpa, "a\r\nb\r\nc\r\n", "a\r\nB\r\nc\r\n", "a\r\nX\r\nc\r\n", .{ .merge = .{ .style = .diff3 }, .write = .{ .labels = .{ .ours = "", .base = "", .theirs = "" } } });
     defer m.deinit();
     try std.testing.expectEqualStrings("a\r\n<<<<<<<\r\nB\r\n|||||||\r\nb\r\n=======\r\nX\r\n>>>>>>>\r\nc\r\n", m.bytes);
     var it = parallax.merge.parseMarkers(m.bytes, .{});

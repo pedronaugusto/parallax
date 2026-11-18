@@ -138,24 +138,34 @@ pub const Merged = struct {
     }
 };
 
+/// How `mergeAlloc` merges and writes.
+pub const MergeAllocOptions = struct {
+    /// How the three texts are merged.
+    merge: Options = .{},
+    /// How the merge is written.
+    write: WriteOptions = .{},
+};
+
+/// What `mergeAlloc` fails with: memory, or the caller's task canceled.
+pub const MergeAllocError = Differ.Error;
+
 /// Merge and write in one call, into memory the caller owns.
 pub fn mergeAlloc(
     gpa: Allocator,
     base: []const u8,
     ours: []const u8,
     theirs: []const u8,
-    options: Options,
-    write_options: WriteOptions,
-) Differ.Error!Merged {
+    options: MergeAllocOptions,
+) MergeAllocError!Merged {
     var d: Differ = .init(gpa);
     defer d.deinit();
-    const m = try d.merge(base, ours, theirs, options);
+    const m = try d.merge(base, ours, theirs, options.merge);
     var out: Io.Writer.Allocating = .init(gpa);
     defer out.deinit();
-    write(&out.writer, m, write_options) catch return error.OutOfMemory;
+    write(&out.writer, m, options.write) catch return error.OutOfMemory;
     return .{
         .bytes = try out.toOwnedSlice(),
-        .conflicts = if (write_options.resolve == .markers) m.conflicts else 0,
+        .conflicts = if (options.write.resolve == .markers) m.conflicts else 0,
         .gpa = gpa,
     };
 }

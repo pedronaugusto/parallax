@@ -294,7 +294,7 @@ marker alone on its line, which `write` writes for an empty label.
 | `writeUnified(w, diff, options, context)` | The unified body, optionally with `---`/`+++` lines, each line through the context's `paint` where it has one |
 | `writeLine(w, line)` | One line of the body, plain, as a painter writes the lines it leaves uncoloured |
 | `merge.write(w, merge, options)` | The merged text with labels, marker size and resolution |
-| `merge.mergeAlloc(gpa, base, ours, theirs, options, write_options)` | Merge and write in one call |
+| `merge.mergeAlloc(gpa, base, ours, theirs, .{ .merge, .write })` | Merge and write in one call |
 | `merge.parseMarkers(text, options)` | The text and conflicts of marked text, one part at a time |
 | `patch.parse(gpa, text, options)` | The files and hunks of a unified patch, borrowing the text |
 | `patch.apply(gpa, w, base, file, options, results)` | The base with one file's hunks applied, and each hunk's result |

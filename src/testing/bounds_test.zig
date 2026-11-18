@@ -207,9 +207,9 @@ fn mergeIds(gpa: std.mem.Allocator, base: []const parallax.ClassId, ours: []cons
 }
 
 fn mergeAll(gpa: std.mem.Allocator, base: []const u8, ours: []const u8, theirs: []const u8) !void {
-    var m = try parallax.merge.mergeAlloc(gpa, base, ours, theirs, .{ .style = .zdiff3 }, .{});
+    var m = try parallax.merge.mergeAlloc(gpa, base, ours, theirs, .{ .merge = .{ .style = .zdiff3 } });
     defer m.deinit();
-    var n = try parallax.merge.mergeAlloc(gpa, base, ours, theirs, .{ .algorithm = .histogram }, .{});
+    var n = try parallax.merge.mergeAlloc(gpa, base, ours, theirs, .{ .merge = .{ .algorithm = .histogram } });
     defer n.deinit();
 }
 
